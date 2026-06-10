@@ -41,7 +41,10 @@ npm run build
     "md2pdf": {
       "command": "node",
       "args": ["/你的绝对路径/md2pdf/dist/index.js"],
-      "description": "HTML/Markdown 转 PDF/图片"
+      "env": {
+        "BAIDU_OCR_API_KEY": "你的百度OCR API Key",
+        "BAIDU_OCR_SECRET_KEY": "你的百度OCR Secret Key"
+      }
     }
   }
 }
@@ -54,8 +57,13 @@ npm run build
 
 > **提示：** 也可用 CLI 一键添加：
 > ```bash
-> claude mcp add --transport stdio --env BAIDU_OCR_API_KEY=<你的BAIDU_OCR_API_KEY> --envBAIDU_OCR_SECRET_KEY=<你的BAIDU_OCR_SECRET_KE> --scope user md2pdf -- node $(pwd)/dist/index.js
+> claude mcp add --transport stdio \
+>   --env BAIDU_OCR_API_KEY=<你的Key> \
+>   --env BAIDU_OCR_SECRET_KEY=<你的Secret> \
+>   --scope user md2pdf -- node $(pwd)/dist/index.js
 > ```
+
+> **OCR 环境变量：** `BAIDU_OCR_API_KEY` 和 `BAIDU_OCR_SECRET_KEY` 为可选配置，仅在需要 OCR 文字识别功能时设置。如不配置，调用 `recognize_text` 时也可通过参数 `apiKey`/`secretKey` 传入。
 
 配置后重启 Claude，即可使用。
 
