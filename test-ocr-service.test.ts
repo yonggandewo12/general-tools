@@ -45,7 +45,7 @@ describe('OcrService', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('imagePath');
+      expect(result.error).toContain('ofdPath');
     });
 
     it('should return error when image file does not exist', async () => {
@@ -288,6 +288,304 @@ describe('OcrService', () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it('should prioritize image over pdf when both provided', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'Image Priority' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        imageBase64: 'dGVzdA==',
+        pdfPath: '/some/file.pdf',
+      });
+
+      expect(result.success).toBe(true);
+      expect(capturedBody).toContain('image=');
+      expect(capturedBody).not.toContain('pdf_file=');
+    });
+
+    it('should send pdf_file parameter when pdfPath is provided', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'PDF Text' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        pdfPath: '/Users/admin/Documents/project/md2pdf/sample.pdf',
+        pdfFileNum: 2,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.text).toBe('PDF Text');
+      expect(capturedBody).toContain('pdf_file=');
+      expect(capturedBody).toContain('pdf_file_num=2');
+      expect(capturedBody).not.toContain('image=');
+    });
+
+    it('should send ofd_file parameter when ofdPath is provided', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'OFD Text' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      // Create a temp OFD-like file for the test
+      const tmpOfdPath = '/tmp/test-ocr-sample.ofd';
+      const { writeFileSync, unlinkSync, existsSync } = await import('fs');
+      writeFileSync(tmpOfdPath, Buffer.from('OFD test content'));
+
+      try {
+        const result = await ocrService.recognize({
+          apiKey: 'test-key',
+          secretKey: 'test-secret',
+          ofdPath: tmpOfdPath,
+          ofdFileNum: 3,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.text).toBe('OFD Text');
+        expect(capturedBody).toContain('ofd_file=');
+        expect(capturedBody).toContain('ofd_file_num=3');
+        expect(capturedBody).not.toContain('image=');
+        expect(capturedBody).not.toContain('pdf_file=');
+      } finally {
+        if (existsSync(tmpOfdPath)) unlinkSync(tmpOfdPath);
+      }
+    });
+
+    it('should prioritize pdf over ofd when both provided', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'PDF Priority' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        pdfPath: '/Users/admin/Documents/project/md2pdf/sample.pdf',
+        ofdPath: '/tmp/test-ocr-sample.ofd',
+      });
+
+      expect(result.success).toBe(true);
+      expect(capturedBody).toContain('pdf_file=');
+      expect(capturedBody).not.toContain('ofd_file=');
+    });
+
+    it('should send language_type parameter when provided', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'JAP Text' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        imageBase64: 'dGVzdA==',
+        languageType: 'JAP',
+      });
+
+      expect(result.success).toBe(true);
+      expect(capturedBody).toContain('language_type=JAP');
+    });
+
+    it('should send multidirectional_recognize when set to true', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'Multi-dir' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        imageBase64: 'dGVzdA==',
+        multidirectionalRecognize: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(capturedBody).toContain('multidirectional_recognize=true');
+    });
+
+    it('should not send detect_direction by default', async () => {
+      let capturedBody = '';
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('oauth/2.0/token')) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: 'mock-token',
+              expires_in: 2592000,
+            }),
+          } as Response;
+        }
+        if (urlStr.includes('accurate_basic')) {
+          capturedBody = init?.body as string || '';
+          return {
+            ok: true,
+            json: async () => ({
+              words_result: [{ words: 'Test' }],
+              words_result_num: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 500 } as Response;
+      });
+
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        imageBase64: 'dGVzdA==',
+      });
+
+      expect(result.success).toBe(true);
+      expect(capturedBody).not.toContain('detect_direction');
+    });
+
+    it('should return error when PDF file does not exist', async () => {
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        pdfPath: '/nonexistent/path/document.pdf',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('PDF 文件不存在');
+    });
+
+    it('should return error when OFD file does not exist', async () => {
+      const result = await ocrService.recognize({
+        apiKey: 'test-key',
+        secretKey: 'test-secret',
+        ofdPath: '/nonexistent/path/document.ofd',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('OFD 文件不存在');
     });
   });
 });

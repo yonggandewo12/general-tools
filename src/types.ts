@@ -116,25 +116,64 @@ export interface ConvertMdResult {
 
 // === OCR (Baidu) ===
 
+export type OcrLanguageType =
+  | 'auto_detect'
+  | 'CHN_ENG'
+  | 'ENG'
+  | 'JAP'
+  | 'KOR'
+  | 'FRE'
+  | 'SPA'
+  | 'POR'
+  | 'GER'
+  | 'ITA'
+  | 'RUS'
+  | 'DAN'
+  | 'DUT'
+  | 'MAL'
+  | 'SWE'
+  | 'IND'
+  | 'POL'
+  | 'ROM'
+  | 'TUR'
+  | 'GRE'
+  | 'HUN'
+  | 'THA'
+  | 'VIE'
+  | 'ARA'
+  | 'HIN';
+
 export interface OcrOptions {
   /** 百度智能云 API Key（可选，优先从环境变量 BAIDU_OCR_API_KEY 读取） */
   apiKey?: string;
   /** 百度智能云 Secret Key（可选，优先从环境变量 BAIDU_OCR_SECRET_KEY 读取） */
   secretKey?: string;
-  /** 本地图片文件路径（三选一） */
+  /** 本地图片文件路径（图片三选一） */
   imagePath?: string;
-  /** 网络图片 URL（三选一） */
+  /** 网络图片 URL（图片三选一） */
   imageUrl?: string;
-  /** Base64 编码图片数据（三选一） */
+  /** Base64 编码图片数据（图片三选一） */
   imageBase64?: string;
+  /** 本地 PDF 文件路径（与图片输入互斥，优先级高于图片） */
+  pdfPath?: string;
+  /** PDF 识别页码，从 1 开始（默认 1，仅 pdfPath 时有效） */
+  pdfFileNum?: number;
+  /** 本地 OFD 文件路径（与图片/PDF 输入互斥） */
+  ofdPath?: string;
+  /** OFD 识别页码，从 1 开始（默认 1，仅 ofdPath 时有效） */
+  ofdFileNum?: number;
+  /** 识别语言类型（默认 CHN_ENG） */
+  languageType?: OcrLanguageType;
   /** 是否检测语言（默认 true） */
   detectLanguage?: boolean;
-  /** 是否检测图像朝向（默认 true） */
+  /** 是否检测图像朝向（默认 false） */
   detectDirection?: boolean;
   /** 是否输出段落信息（默认 false） */
   paragraph?: boolean;
-  /** 是否返回置信度（默认 true） */
+  /** 是否返回识别结果中每一行的置信度（默认 true） */
   probability?: boolean;
+  /** 是否开启行级别多方向文字识别（默认 false，图内有不同方向文字时建议 true） */
+  multidirectionalRecognize?: boolean;
 }
 
 export interface OcrWordItem {

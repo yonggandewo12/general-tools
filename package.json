@@ -1,10 +1,10 @@
 {
-  "name": "md2pdf-mcp-server",
+  "name": "general-tools-mcp-server",
   "version": "1.0.0",
   "description": "MCP server for converting Markdown/HTML to PDF using Puppeteer",
   "type": "module",
   "bin": {
-    "md2pdf-mcp-server": "./dist/index.js"
+    "general-tools-mcp-server": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

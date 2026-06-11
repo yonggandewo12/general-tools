@@ -277,7 +277,7 @@ const CONVERT_MD_TO_PDF_TOOL: Tool = {
 
 const RECOGNIZE_TEXT_TOOL: Tool = {
   name: 'recognize_text',
-  description: 'Extract text from images using Baidu OCR API (supports Chinese and English)',
+  description: 'Extract text from images or PDF files using Baidu OCR API (supports Chinese and English)',
   inputSchema: {
     type: 'object',
     properties: {
@@ -291,15 +291,36 @@ const RECOGNIZE_TEXT_TOOL: Tool = {
       },
       imagePath: {
         type: 'string',
-        description: 'Local image file path (one of imagePath, imageUrl, imageBase64 is required)'
+        description: 'Local image file path (one of imagePath, imageUrl, imageBase64, pdfPath)'
       },
       imageUrl: {
         type: 'string',
-        description: 'Image URL (one of imagePath, imageUrl, imageBase64 is required)'
+        description: 'Image URL (one of imagePath, imageUrl, imageBase64, pdfPath)'
       },
       imageBase64: {
         type: 'string',
-        description: 'Base64 encoded image data (one of imagePath, imageUrl, imageBase64 is required)'
+        description: 'Base64 encoded image data (one of imagePath, imageUrl, imageBase64, pdfPath)'
+      },
+      pdfPath: {
+        type: 'string',
+        description: 'Local PDF file path (one of imagePath, imageUrl, imageBase64, pdfPath, ofdPath). Priority: image > url > pdf_file > ofd_file'
+      },
+      pdfFileNum: {
+        type: 'number',
+        description: 'PDF page number to recognize, starting from 1 (default: 1, only effective with pdfPath)'
+      },
+      ofdPath: {
+        type: 'string',
+        description: 'Local OFD file path (one of imagePath, imageUrl, imageBase64, pdfPath, ofdPath). Priority: image > url > pdf_file > ofd_file'
+      },
+      ofdFileNum: {
+        type: 'number',
+        description: 'OFD page number to recognize, starting from 1 (default: 1, only effective with ofdPath)'
+      },
+      languageType: {
+        type: 'string',
+        enum: ['auto_detect', 'CHN_ENG', 'ENG', 'JAP', 'KOR', 'FRE', 'SPA', 'POR', 'GER', 'ITA', 'RUS', 'DAN', 'DUT', 'MAL', 'SWE', 'IND', 'POL', 'ROM', 'TUR', 'GRE', 'HUN', 'THA', 'VIE', 'ARA', 'HIN'],
+        description: 'Language type for recognition (default: CHN_ENG)'
       },
       detectLanguage: {
         type: 'boolean',
@@ -307,7 +328,7 @@ const RECOGNIZE_TEXT_TOOL: Tool = {
       },
       detectDirection: {
         type: 'boolean',
-        description: 'Detect image orientation (default: true)'
+        description: 'Detect image orientation (default: false)'
       },
       paragraph: {
         type: 'boolean',
@@ -315,7 +336,11 @@ const RECOGNIZE_TEXT_TOOL: Tool = {
       },
       probability: {
         type: 'boolean',
-        description: 'Return confidence scores (default: true)'
+        description: 'Return confidence scores per line (default: true)'
+      },
+      multidirectionalRecognize: {
+        type: 'boolean',
+        description: 'Enable line-level multi-direction text recognition (default: false, set true when image has text in different directions)'
       }
     }
   }
@@ -327,7 +352,7 @@ class Md2PdfServer {
   constructor() {
     this.server = new Server(
       {
-        name: 'md2pdf-mcp-server',
+        name: 'general-tools-mcp-server',
         version: '1.0.0',
       },
       {
@@ -683,7 +708,7 @@ class Md2PdfServer {
   async run(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('MD to PDF MCP Server running on stdio');
+    console.error('General Tools MCP Server running on stdio');
 
     // Exit when parent closes stdin (EOF), so the process doesn't hang
     process.stdin.on('end', async () => {

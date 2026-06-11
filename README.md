@@ -1,6 +1,6 @@
-# HTML/Markdown 转 PDF — MCP Server
+# General Tools — MCP Server
 
-基于 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 的服务器，提供 HTML 和 Markdown 转 PDF 的能力。底层使用 Puppeteer（无头 Chrome）进行浏览器级渲染，确保输出与浏览器表现一致。
+基于 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 的通用工具服务器，提供 HTML/Markdown 转 PDF/图片、OCR 文字识别等能力。底层使用 Puppeteer（无头 Chrome）进行浏览器级渲染，确保输出与浏览器表现一致。
 
 ---
 
@@ -18,7 +18,7 @@
 - **交互增强** — 可选 JS 提供滚动进度条、目录高亮、返回顶部
 - **打印优化** — 专门的 `@media print` 样式
 - **浏览器实例复用** — 首次启动后后续转换只需 ~0.5-1s
-- **OCR 文字识别** — 基于百度智能云 OCR，支持中英文图片文字提取
+- **OCR 文字识别** — 基于百度智能云 OCR，支持图片、PDF、OFD 文字提取，25+ 种语言
 
 ---
 
@@ -38,9 +38,9 @@ npm run build
 ```json
 {
   "mcpServers": {
-    "md2pdf": {
+    "general-tools": {
       "command": "node",
-      "args": ["/你的绝对路径/md2pdf/dist/index.js"],
+      "args": ["/你的绝对路径/general-tools/dist/index.js"],
       "env": {
         "BAIDU_OCR_API_KEY": "你的百度OCR API Key",
         "BAIDU_OCR_SECRET_KEY": "你的百度OCR Secret Key"
@@ -60,7 +60,7 @@ npm run build
 > claude mcp add --transport stdio \
 >   --env BAIDU_OCR_API_KEY=<你的Key> \
 >   --env BAIDU_OCR_SECRET_KEY=<你的Secret> \
->   --scope user md2pdf -- node $(pwd)/dist/index.js
+>   --scope user general-tools -- node $(pwd)/dist/index.js
 > ```
 
 > **OCR 环境变量：** `BAIDU_OCR_API_KEY` 和 `BAIDU_OCR_SECRET_KEY` 为可选配置，仅在需要 OCR 文字识别功能时设置。如不配置，调用 `recognize_text` 时也可通过参数 `apiKey`/`secretKey` 传入。
@@ -163,25 +163,53 @@ Claude，把 README.md 转成 PDF，A4 格式，带交互导航
 
 ### 工具 5：`recognize_text`
 
-基于百度智能云 OCR API，从图片中提取文字，支持中文和英文。
+基于百度智能云 OCR API，从图片、PDF 或 OFD 文件中提取文字，支持中英文及多种语言。
 
 ```
 Claude，识别 /path/to/image.png 中的文字
+Claude，识别 /path/to/document.pdf 第2页的文字
+Claude，识别 /path/to/doc.ofd 中的文字
 ```
 
 **参数：**
 
 | 参数 | 类型 | 说明 | 默认值 |
 |------|------|------|--------|
-| `imagePath` | string | 本地图片文件路径（三选一） | - |
-| `imageUrl` | string | 网络图片 URL（三选一） | - |
-| `imageBase64` | string | Base64 编码图片数据（三选一） | - |
+| `imagePath` | string | 本地图片文件路径（图片三选一） | - |
+| `imageUrl` | string | 网络图片 URL（图片三选一） | - |
+| `imageBase64` | string | Base64 编码图片数据（图片三选一） | - |
+| `pdfPath` | string | 本地 PDF 文件路径 | - |
+| `pdfFileNum` | number | PDF 识别页码，从 1 开始 | 1 |
+| `ofdPath` | string | 本地 OFD 文件路径 | - |
+| `ofdFileNum` | number | OFD 识别页码，从 1 开始 | 1 |
 | `apiKey` | string | 百度智能云 API Key（可选，优先读环境变量 `BAIDU_OCR_API_KEY`） | - |
 | `secretKey` | string | 百度智能云 Secret Key（可选，优先读环境变量 `BAIDU_OCR_SECRET_KEY`） | - |
+| `languageType` | enum | 识别语言类型（见下表） | CHN_ENG |
 | `detectLanguage` | boolean | 检测图片中的语言 | true |
-| `detectDirection` | boolean | 检测图像朝向 | true |
+| `detectDirection` | boolean | 检测图像朝向 | false |
 | `paragraph` | boolean | 输出段落信息 | false |
-| `probability` | boolean | 返回置信度分数 | true |
+| `probability` | boolean | 返回每行置信度分数 | true |
+| `multidirectionalRecognize` | boolean | 行级别多方向文字识别（图内有不同方向文字时建议开启） | false |
+
+> **输入优先级：** `image > url > pdf_file > ofd_file`，当 image/url 字段存在时，pdf_file/ofd_file 字段失效。
+
+**`languageType` 可选值：**
+
+| 值 | 语言 | 值 | 语言 |
+|----|------|----|------|
+| `auto_detect` | 自动检测 | `CHN_ENG` | 中英文混合 |
+| `ENG` | 英文 | `JAP` | 日语 |
+| `KOR` | 韩语 | `FRE` | 法语 |
+| `SPA` | 西班牙语 | `POR` | 葡萄牙语 |
+| `GER` | 德语 | `ITA` | 意大利语 |
+| `RUS` | 俄语 | `DAN` | 丹麦语 |
+| `DUT` | 荷兰语 | `MAL` | 马来语 |
+| `SWE` | 瑞典语 | `IND` | 印尼语 |
+| `POL` | 波兰语 | `ROM` | 罗马尼亚语 |
+| `TUR` | 土耳其语 | `GRE` | 希腊语 |
+| `HUN` | 匈牙利语 | `THA` | 泰语 |
+| `VIE` | 越南语 | `ARA` | 阿拉伯语 |
+| `HIN` | 印地语 | | |
 
 > **认证方式：** 优先使用工具参数 `apiKey`/`secretKey`，未提供时从环境变量 `BAIDU_OCR_API_KEY`/`BAIDU_OCR_SECRET_KEY` 读取。MCP 配置时可通过 `--env` 传入：
 > ```bash
@@ -195,7 +223,7 @@ Claude，识别 /path/to/image.png 中的文字
 ## 架构
 
 ```
-md2pdf/
+general-tools/
 ├── src/
 │   ├── index.ts           # MCP 服务入口（工具注册、请求处理）
 │   ├── md-converter.ts    # Markdown → HTML 渲染管线
@@ -265,6 +293,9 @@ fc-cache -fv
 - **图片嵌入**：根据 Markdown 所在目录解析相对路径，转为 data:image URI
 - **Mermaid**：检测到代码块时自动加载 CDN JS 并渲染
 - **OCR 服务**：
+  - 输入优先级：image > url > pdf_file > ofd_file
+  - 支持 PDF/OFD 文件识别，可指定页码
+  - 支持 25+ 种语言识别
   - Token 缓存：access_token 有效期 30 天，提前 1 天自动刷新
   - 降级策略：高精度接口失败时自动降级到通用接口
   - 错误映射：百度 OCR 错误码自动翻译为中文提示

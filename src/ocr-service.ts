@@ -104,6 +104,44 @@ export class OcrService {
   }
 
   /**
+   * Resolve input to base64 and input type.
+   * Priority per Baidu OCR: image > url > pdf_file > ofd_file
+   */
+  private async resolveInput(options: OcrOptions): Promise<{ base64: string; inputType: 'image' | 'pdf' | 'ofd' }> {
+    // Image inputs take highest priority (per Baidu OCR spec: image > url > pdf_file > ofd_file)
+    if (options.imagePath || options.imageUrl || options.imageBase64) {
+      const imageBase64 = await this.resolveImageBase64(options);
+      return { base64: imageBase64, inputType: 'image' };
+    }
+
+    // PDF input (priority over OFD)
+    if (options.pdfPath) {
+      const resolved = path.resolve(options.pdfPath);
+      try {
+        await fs.access(resolved);
+      } catch {
+        throw new Error(`PDF 文件不存在: ${resolved}`);
+      }
+      const buffer = await fs.readFile(resolved);
+      return { base64: buffer.toString('base64'), inputType: 'pdf' };
+    }
+
+    // OFD input
+    if (options.ofdPath) {
+      const resolved = path.resolve(options.ofdPath);
+      try {
+        await fs.access(resolved);
+      } catch {
+        throw new Error(`OFD 文件不存在: ${resolved}`);
+      }
+      const buffer = await fs.readFile(resolved);
+      return { base64: buffer.toString('base64'), inputType: 'ofd' };
+    }
+
+    throw new Error('必须提供 imagePath、imageUrl、imageBase64、pdfPath 或 ofdPath 其中之一');
+  }
+
+  /**
    * Resolve image input to base64 string.
    * Priority: imagePath > imageUrl > imageBase64
    */
@@ -131,30 +169,49 @@ export class OcrService {
   }
 
   /**
-   * Call a Baidu OCR API endpoint with the given image and options.
+   * Call a Baidu OCR API endpoint with the given input and options.
    */
   private async callOcrApi(
     endpoint: string,
     accessToken: string,
-    imageBase64: string,
+    input: { base64: string; inputType: 'image' | 'pdf' | 'ofd' },
     options: OcrOptions,
   ): Promise<OcrResult> {
     const url = `${endpoint}?access_token=${encodeURIComponent(accessToken)}`;
 
     const params = new URLSearchParams();
-    params.append('image', imageBase64);
+
+    if (input.inputType === 'pdf') {
+      params.append('pdf_file', input.base64);
+      if (options.pdfFileNum && options.pdfFileNum > 1) {
+        params.append('pdf_file_num', String(options.pdfFileNum));
+      }
+    } else if (input.inputType === 'ofd') {
+      params.append('ofd_file', input.base64);
+      if (options.ofdFileNum && options.ofdFileNum > 1) {
+        params.append('ofd_file_num', String(options.ofdFileNum));
+      }
+    } else {
+      params.append('image', input.base64);
+    }
 
     if (options.detectLanguage !== false) {
       params.append('detect_language', 'true');
     }
-    if (options.detectDirection !== false) {
+    if (options.detectDirection) {
       params.append('detect_direction', 'true');
+    }
+    if (options.languageType) {
+      params.append('language_type', options.languageType);
     }
     if (options.paragraph) {
       params.append('paragraph', 'true');
     }
     if (options.probability !== false) {
       params.append('probability', 'true');
+    }
+    if (options.multidirectionalRecognize) {
+      params.append('multidirectional_recognize', 'true');
     }
 
     const response = await fetch(url, {
@@ -204,7 +261,7 @@ export class OcrService {
         throw new Error('百度 OCR 认证失败，请通过工具参数 apiKey/secretKey 或环境变量 BAIDU_OCR_API_KEY/BAIDU_OCR_SECRET_KEY 提供密钥');
       }
 
-      const imageBase64 = await this.resolveImageBase64(options);
+      const input = await this.resolveInput(options);
       const accessToken = await this.getAccessToken(apiKey, secretKey);
 
       const ACCURATE_BASIC = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic';
@@ -212,7 +269,7 @@ export class OcrService {
 
       // Try accurate_basic first
       try {
-        const result = await this.callOcrApi(ACCURATE_BASIC, accessToken, imageBase64, options);
+        const result = await this.callOcrApi(ACCURATE_BASIC, accessToken, input, options);
         return {
           ...result,
           apiUsed: 'accurate_basic',
@@ -220,7 +277,7 @@ export class OcrService {
         };
       } catch (accurateError) {
         // Fall back to general_basic
-        const result = await this.callOcrApi(GENERAL_BASIC, accessToken, imageBase64, options);
+        const result = await this.callOcrApi(GENERAL_BASIC, accessToken, input, options);
         return {
           ...result,
           apiUsed: 'general_basic (fallback)',
