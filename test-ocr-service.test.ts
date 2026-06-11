@@ -357,7 +357,7 @@ describe('OcrService', () => {
       const result = await ocrService.recognize({
         apiKey: 'test-key',
         secretKey: 'test-secret',
-        pdfPath: '/Users/admin/Documents/project/md2pdf/sample.pdf',
+        pdfPath: '/Users/admin/Documents/project/general-tools/sample.pdf',
         pdfFileNum: 2,
       });
 
@@ -447,7 +447,7 @@ describe('OcrService', () => {
       const result = await ocrService.recognize({
         apiKey: 'test-key',
         secretKey: 'test-secret',
-        pdfPath: '/Users/admin/Documents/project/md2pdf/sample.pdf',
+        pdfPath: '/Users/admin/Documents/project/general-tools/sample.pdf',
         ofdPath: '/tmp/test-ocr-sample.ofd',
       });
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-在现有 `md2pdf-mcp-server` 项目中新增基于百度智能云 OCR 的通用文字识别能力，作为第 5 个 MCP Tool 暴露给 AI 代理使用。采用百度 OCR 高精度版通用文字识别接口（`accurate_basic`），支持中英文识别。
+在现有 `general-tools` 项目中新增基于百度智能云 OCR 的通用文字识别能力，作为第 5 个 MCP Tool 暴露给 AI 代理使用。采用百度 OCR 高精度版通用文字识别接口（`accurate_basic`），支持中英文识别。
 
 ## 决策记录
 
