@@ -3,3 +3,4 @@ dist/
 .idea/
 .qoder/
 *.pdf
+/.claude/
