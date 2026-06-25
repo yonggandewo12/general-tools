@@ -4,3 +4,4 @@ dist/
 .qoder/
 *.pdf
 /.claude/
+/liteparse/

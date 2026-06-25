@@ -11,12 +11,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { PdfConverter } from './pdf-converter.js';
 import { MdConverter } from './md-converter.js';
-import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions } from './types.js';
+import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExtractOptions, PdfScreenshotOptions } from './types.js';
 import { OcrService } from './ocr-service.js';
+import { PdfExtractor } from './pdf-extractor.js';
 
 const converter = new PdfConverter();
 const mdConverter = new MdConverter();
 const ocrService = new OcrService();
+const pdfExtractor = new PdfExtractor();
 
 const CONVERT_HTML_TO_PDF_TOOL: Tool = {
   name: 'convert_html_to_pdf',
@@ -346,6 +348,90 @@ const RECOGNIZE_TEXT_TOOL: Tool = {
   }
 };
 
+const EXTRACT_PDF_TEXT_TOOL: Tool = {
+  name: 'extract_pdf_text',
+  description: 'Extract text from PDF files using LiteParse (PDFium-based). Supports text, JSON, and Markdown output formats. Optional OCR for scanned documents. Runs entirely locally with no cloud dependencies.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pdfPath: {
+        type: 'string',
+        description: 'Path to the local PDF file (required)'
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['text', 'json', 'markdown'],
+        description: 'Output format (default: text). "markdown" includes headings, tables, lists, images, and links.'
+      },
+      targetPages: {
+        type: 'string',
+        description: 'Pages to extract, e.g. "1-5,10,15-20" (default: all pages)'
+      },
+      ocrEnabled: {
+        type: 'boolean',
+        description: 'Enable OCR for scanned documents (default: false)'
+      },
+      ocrLanguage: {
+        type: 'string',
+        description: 'OCR language in Tesseract format (default: eng). Examples: eng, chi_sim, jpn, kor, fra, deu'
+      },
+      ocrServerUrl: {
+        type: 'string',
+        description: 'HTTP OCR server URL (optional, uses built-in Tesseract if not provided)'
+      },
+      maxPages: {
+        type: 'number',
+        description: 'Maximum number of pages to parse (default: 1000)'
+      },
+      dpi: {
+        type: 'number',
+        description: 'Rendering DPI (default: 150)'
+      },
+      imageMode: {
+        type: 'string',
+        enum: ['off', 'placeholder', 'embed'],
+        description: 'Markdown image handling: "off" strips images, "placeholder" emits references, "embed" writes to disk (default: off)'
+      },
+      password: {
+        type: 'string',
+        description: 'Password for encrypted PDF documents'
+      }
+    },
+    required: ['pdfPath']
+  }
+};
+
+const SCREENSHOT_PDF_TOOL: Tool = {
+  name: 'screenshot_pdf',
+  description: 'Generate page screenshots (PNG) from PDF files using LiteParse. Useful for LLM agents to extract visual information that text alone cannot capture.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pdfPath: {
+        type: 'string',
+        description: 'Path to the local PDF file (required)'
+      },
+      targetPages: {
+        type: 'string',
+        description: 'Pages to screenshot, e.g. "1,3,5" or "1-5" (default: all pages)'
+      },
+      dpi: {
+        type: 'number',
+        description: 'Rendering DPI (default: 150)'
+      },
+      outputDir: {
+        type: 'string',
+        description: 'Output directory for screenshot files (default: current directory)'
+      },
+      password: {
+        type: 'string',
+        description: 'Password for encrypted PDF documents'
+      }
+    },
+    required: ['pdfPath']
+  }
+};
+
 class Md2PdfServer {
   private server: Server;
 
@@ -384,7 +470,7 @@ class Md2PdfServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL]
+        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL]
       };
     });
 
@@ -667,6 +753,105 @@ class Md2PdfServer {
                 {
                   type: 'text',
                   text: JSON.stringify(response, null, 2)
+                }
+              ]
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: false,
+                    error: result.error,
+                    processingTime: `${result.details?.processingTime}ms`
+                  }, null, 2)
+                }
+              ],
+              isError: true
+            };
+          }
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error)
+                }, null, 2)
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      if (name === 'extract_pdf_text') {
+        try {
+          const options = args as unknown as PdfExtractOptions;
+          const result = await pdfExtractor.extract(options);
+
+          if (result.success) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    text: result.text,
+                    pageCount: result.pageCount,
+                    processingTime: `${result.details?.processingTime}ms`,
+                  }, null, 2)
+                }
+              ]
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: false,
+                    error: result.error,
+                    processingTime: `${result.details?.processingTime}ms`
+                  }, null, 2)
+                }
+              ],
+              isError: true
+            };
+          }
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error)
+                }, null, 2)
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      if (name === 'screenshot_pdf') {
+        try {
+          const options = args as unknown as PdfScreenshotOptions;
+          const result = await pdfExtractor.screenshot(options);
+
+          if (result.success) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    screenshots: result.screenshots,
+                    processingTime: `${result.details?.processingTime}ms`,
+                  }, null, 2)
                 }
               ]
             };

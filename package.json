@@ -23,6 +23,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@llamaindex/liteparse": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "markdown-it": "^14.2.0",
     "markdown-it-anchor": "^9.2.0",
