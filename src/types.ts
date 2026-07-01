@@ -266,3 +266,129 @@ export interface PdfScreenshotResult {
   error?: string;
   details?: { processingTime: number };
 }
+
+// === PPT Generation (ppt-master) ===
+
+export type PptCanvasFormat =
+  | 'ppt169'
+  | 'ppt43'
+  | 'wechat'
+  | 'xiaohongshu'
+  | 'moments'
+  | 'story'
+  | 'banner'
+  | 'a4';
+
+export interface GeneratePresentationOptions {
+  /** Existing project directory with svg_output/ (export mode) */
+  projectDir?: string;
+  /** Raw Markdown content (prepare mode) */
+  markdownContent?: string;
+  /** Path to a Markdown file (prepare mode) */
+  markdownPath?: string;
+  /** URL to fetch as a source (prepare mode) */
+  sourceUrl?: string;
+  /** Path to a source file (pdf/docx/xlsx/pptx/html/etc.) (prepare mode) */
+  sourceFile?: string;
+  /** Project name when creating a new project (prepare mode) */
+  projectName?: string;
+  /** Base directory for the new project (prepare mode, default: process.cwd()) */
+  outputDir?: string;
+  /** Canvas format for a new project (default: ppt169) */
+  canvasFormat?: PptCanvasFormat;
+  /** Explicit output PPTX path (export mode) */
+  outputPath?: string;
+  /** SVG source directory: 'output' (default) or 'final' (export mode) */
+  svgSource?: 'output' | 'final';
+  /** Page transition effect, e.g. 'fade' */
+  transition?: string;
+  /** Per-element entrance animation, e.g. 'auto' */
+  animation?: string;
+  /** Per-call timeout in milliseconds (default: 120000) */
+  timeout?: number;
+}
+
+export interface GeneratePresentationResult {
+  success: boolean;
+  /** Set when a new project was prepared */
+  projectDir?: string;
+  /** Set when a PPTX was exported */
+  outputPath?: string;
+  /** Human-readable status message */
+  message?: string;
+  error?: string;
+  details?: {
+    processingTime: number;
+    exported?: boolean;
+    svgCount?: number;
+  };
+}
+
+// === AI Image Generation ===
+
+export interface GenerateImageOptions {
+  /** Image generation prompt */
+  prompt: string;
+  /** Aspect ratio (default: 16:9) */
+  aspectRatio?: string;
+  /** Image size: 512px, 1K, 2K, 4K (default: 1K) */
+  imageSize?: string;
+  /** Backend override, e.g. 'openai', 'gemini' */
+  backend?: string;
+  /** Output directory (default: process.cwd()) */
+  outputDir?: string;
+  /** Output filename without extension (default: generated) */
+  filename?: string;
+  /** Model override */
+  model?: string;
+  /** Per-call timeout in milliseconds (default: 120000) */
+  timeout?: number;
+}
+
+export interface GenerateImageResult {
+  success: boolean;
+  imagePath?: string;
+  error?: string;
+  details?: {
+    processingTime: number;
+    backend?: string;
+  };
+}
+
+// === Source to Markdown ===
+
+export type MarkdownSourceType = 'auto' | 'pdf' | 'doc' | 'excel' | 'ppt' | 'web';
+
+export interface ConvertToMarkdownOptions {
+  /** Source file path or URL */
+  source: string;
+  /** Source type; 'auto' detects from extension/URL */
+  sourceType?: MarkdownSourceType;
+  /** Output Markdown file path (default: auto-generated) */
+  outputPath?: string;
+  /** Maximum rows per sheet for Excel (default: 0 = no limit) */
+  maxRows?: number;
+  /** Maximum columns per sheet for Excel (default: 0 = no limit) */
+  maxCols?: number;
+  /** PDF image extraction mode: 'all' | 'filtered' | 'none' (default: filtered) */
+  pdfImages?: 'all' | 'filtered' | 'none';
+  /** Render PDF vector figures as PNG assets (default: false) */
+  renderVectorFigures?: boolean;
+  /** DPI for rendered PDF vector figures (default: 150) */
+  vectorFigureDpi?: number;
+  /** Per-call timeout in milliseconds (default: 120000) */
+  timeout?: number;
+}
+
+export interface ConvertToMarkdownResult {
+  success: boolean;
+  markdownPath?: string;
+  /** Companion asset directory, if any */
+  assetsDir?: string;
+  error?: string;
+  details?: {
+    processingTime: number;
+    sourceType: string;
+    assetCount?: number;
+  };
+}

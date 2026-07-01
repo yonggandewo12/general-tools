@@ -1,24 +1,35 @@
 {
   "name": "general-tools-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for converting Markdown/HTML to PDF using Puppeteer",
+  "description": "MCP server for HTML/Markdown/PDF conversion, OCR, PPT generation, AI image generation, and document-to-Markdown conversion",
   "type": "module",
   "bin": {
     "general-tools-mcp-server": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "scripts/ppt-master"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:python": "pip install -r scripts/ppt-master/requirements.txt"
   },
   "keywords": [
     "mcp",
     "html",
     "pdf",
     "puppeteer",
-    "converter"
+    "converter",
+    "ppt",
+    "pptx",
+    "presentation",
+    "markdown",
+    "ocr",
+    "image-generation"
   ],
   "author": "",
   "license": "MIT",

@@ -11,14 +11,16 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { PdfConverter } from './pdf-converter.js';
 import { MdConverter } from './md-converter.js';
-import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExtractOptions, PdfScreenshotOptions } from './types.js';
+import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExtractOptions, PdfScreenshotOptions, GeneratePresentationOptions, GenerateImageOptions, ConvertToMarkdownOptions } from './types.js';
 import { OcrService } from './ocr-service.js';
 import { PdfExtractor } from './pdf-extractor.js';
+import { PptMasterService } from './ppt-master-service.js';
 
 const converter = new PdfConverter();
 const mdConverter = new MdConverter();
 const ocrService = new OcrService();
 const pdfExtractor = new PdfExtractor();
+const pptMasterService = new PptMasterService();
 
 const CONVERT_HTML_TO_PDF_TOOL: Tool = {
   name: 'convert_html_to_pdf',
@@ -432,6 +434,162 @@ const SCREENSHOT_PDF_TOOL: Tool = {
   }
 };
 
+const GENERATE_PRESENTATION_TOOL: Tool = {
+  name: 'generate_presentation',
+  description: 'Prepare a ppt-master project from Markdown/source material, or export an existing project to PPTX. NOTE: AI-driven SVG generation is not performed by this tool; populate svg_output/ first via the ppt-master SKILL.md workflow, then call this tool with projectDir to export.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectDir: {
+        type: 'string',
+        description: 'Existing project directory with svg_output/ (export mode)'
+      },
+      markdownContent: {
+        type: 'string',
+        description: 'Raw Markdown content (prepare mode)'
+      },
+      markdownPath: {
+        type: 'string',
+        description: 'Path to a Markdown file (prepare mode)'
+      },
+      sourceUrl: {
+        type: 'string',
+        description: 'URL to import as source (prepare mode)'
+      },
+      sourceFile: {
+        type: 'string',
+        description: 'Path to a source file: pdf/docx/xlsx/pptx/etc. (prepare mode)'
+      },
+      projectName: {
+        type: 'string',
+        description: 'Name for a newly created project'
+      },
+      outputDir: {
+        type: 'string',
+        description: 'Base directory for the new project (default: cwd)'
+      },
+      canvasFormat: {
+        type: 'string',
+        enum: ['ppt169', 'ppt43', 'wechat', 'xiaohongshu', 'moments', 'story', 'banner', 'a4'],
+        description: 'Canvas format for new project (default: ppt169)'
+      },
+      outputPath: {
+        type: 'string',
+        description: 'Explicit PPTX output path (export mode)'
+      },
+      svgSource: {
+        type: 'string',
+        enum: ['output', 'final'],
+        description: 'SVG source directory for export (default: output)'
+      },
+      transition: {
+        type: 'string',
+        description: 'Slide transition effect, e.g. fade'
+      },
+      animation: {
+        type: 'string',
+        description: 'Per-element animation effect, e.g. auto'
+      },
+      timeout: {
+        type: 'number',
+        description: 'Timeout in milliseconds (default: 120000)'
+      }
+    }
+  }
+};
+
+const GENERATE_IMAGE_TOOL: Tool = {
+  name: 'generate_image',
+  description: 'Generate an image using an AI image backend configured via environment variables (IMAGE_BACKEND, GEMINI_API_KEY, OPENAI_API_KEY, etc.). Supports 17+ backends including OpenAI, Gemini, Qwen, Zhipu, Volcengine, Stability, and more.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: 'string',
+        description: 'Image generation prompt'
+      },
+      aspectRatio: {
+        type: 'string',
+        description: 'Aspect ratio (default: 16:9)'
+      },
+      imageSize: {
+        type: 'string',
+        description: 'Image size: 512px, 1K, 2K, 4K (default: 1K)'
+      },
+      backend: {
+        type: 'string',
+        description: 'Backend override, e.g. openai, gemini, qwen, zhipu, volcengine'
+      },
+      outputDir: {
+        type: 'string',
+        description: 'Output directory (default: cwd)'
+      },
+      filename: {
+        type: 'string',
+        description: 'Output filename without extension'
+      },
+      model: {
+        type: 'string',
+        description: 'Model override'
+      },
+      timeout: {
+        type: 'number',
+        description: 'Timeout in milliseconds (default: 120000)'
+      }
+    },
+    required: ['prompt']
+  }
+};
+
+const CONVERT_TO_MARKDOWN_TOOL: Tool = {
+  name: 'convert_to_markdown',
+  description: 'Convert PDF, DOCX, Excel, PowerPoint, or web pages to Markdown. Auto-detects source type from file extension or URL.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      source: {
+        type: 'string',
+        description: 'Source file path or URL'
+      },
+      sourceType: {
+        type: 'string',
+        enum: ['auto', 'pdf', 'doc', 'excel', 'ppt', 'web'],
+        description: 'Source type (default: auto-detect from extension/URL)'
+      },
+      outputPath: {
+        type: 'string',
+        description: 'Output Markdown file path'
+      },
+      maxRows: {
+        type: 'number',
+        description: 'Excel max rows per sheet'
+      },
+      maxCols: {
+        type: 'number',
+        description: 'Excel max columns per sheet'
+      },
+      pdfImages: {
+        type: 'string',
+        enum: ['all', 'filtered', 'none'],
+        description: 'PDF image extraction mode (default: filtered)'
+      },
+      renderVectorFigures: {
+        type: 'boolean',
+        description: 'Render PDF vector figures as PNG'
+      },
+      vectorFigureDpi: {
+        type: 'number',
+        description: 'DPI for rendered PDF vector figures (default: 150)'
+      },
+      timeout: {
+        type: 'number',
+        description: 'Timeout in milliseconds (default: 120000)'
+      }
+    },
+    required: ['source']
+  }
+};
+
 class Md2PdfServer {
   private server: Server;
 
@@ -470,7 +628,7 @@ class Md2PdfServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL]
+        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL, GENERATE_PRESENTATION_TOOL, GENERATE_IMAGE_TOOL, CONVERT_TO_MARKDOWN_TOOL]
       };
     });
 
@@ -882,6 +1040,54 @@ class Md2PdfServer {
               }
             ],
             isError: true
+          };
+        }
+      }
+
+      if (name === 'generate_presentation') {
+        try {
+          const options = args as GeneratePresentationOptions;
+          const result = await pptMasterService.generatePresentation(options);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            isError: !result.success,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+
+      if (name === 'generate_image') {
+        try {
+          const options = args as unknown as GenerateImageOptions;
+          const result = await pptMasterService.generateImage(options);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            isError: !result.success,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+
+      if (name === 'convert_to_markdown') {
+        try {
+          const options = args as unknown as ConvertToMarkdownOptions;
+          const result = await pptMasterService.convertToMarkdown(options);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            isError: !result.success,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
+            isError: true,
           };
         }
       }
