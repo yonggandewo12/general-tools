@@ -237,6 +237,7 @@ export class PptMasterService {
         '-f', filename,
       ];
       if (options.model) args.push('-m', options.model);
+      if (options.referenceImage) args.push('--reference_image', options.referenceImage);
 
       const before = await this.listImageFiles(outputDir);
       const result = await this.runner.run('image_gen.py', args, {

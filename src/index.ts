@@ -500,7 +500,7 @@ const GENERATE_PRESENTATION_TOOL: Tool = {
 
 const GENERATE_IMAGE_TOOL: Tool = {
   name: 'generate_image',
-  description: 'Generate an image using an AI image backend configured via environment variables (IMAGE_BACKEND, GEMINI_API_KEY, OPENAI_API_KEY, etc.). Supports 17+ backends including OpenAI, Gemini, Qwen, Zhipu, Volcengine, Stability, and more.',
+  description: 'Generate an image using an AI image backend configured via environment variables (IMAGE_BACKEND, GEMINI_API_KEY, OPENAI_API_KEY, etc.). Supports 18+ backends including OpenAI, Gemini, Qwen, Zhipu, Volcengine, Agnes AI, Stability, and more.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -518,7 +518,7 @@ const GENERATE_IMAGE_TOOL: Tool = {
       },
       backend: {
         type: 'string',
-        description: 'Backend override, e.g. openai, gemini, qwen, zhipu, volcengine'
+        description: 'Backend override, e.g. openai, gemini, qwen, zhipu, volcengine, agnes'
       },
       outputDir: {
         type: 'string',
@@ -531,6 +531,10 @@ const GENERATE_IMAGE_TOOL: Tool = {
       model: {
         type: 'string',
         description: 'Model override'
+      },
+      referenceImage: {
+        type: 'string',
+        description: 'Reference image URL for image-to-image generation (supported by agnes backend)'
       },
       timeout: {
         type: 'number',

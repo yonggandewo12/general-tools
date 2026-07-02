@@ -20,7 +20,7 @@
 - **浏览器实例复用** — 首次启动后后续转换只需 ~0.5-1s
 - **OCR 文字识别** — 基于百度智能云 OCR，支持图片、PDF、OFD 文字提取，25+ 种语言
 - **PPT 生成** — 将 AI 生成的 SVG 幻灯片导出为原生可编辑 PPTX，支持动画与切换效果
-- **AI 图片生成** — 对接 17+ 后端（OpenAI、Gemini、Qwen 等），从文字提示生成图片
+- **AI 图片生成** — 对接 18+ 后端（OpenAI、Gemini、Qwen、Agnes AI 等），支持文生图和图生图
 - **文档转 Markdown** — PDF、DOCX、Excel、PowerPoint、网页 → 结构化 Markdown
 
 ---
@@ -128,6 +128,7 @@ claude mcp add general-tools \
 | `qwen` | qwen-image-2.0-pro | `QWEN_API_KEY=xxx` | 阿里通义万相 |
 | `zhipu` | glm-image | `ZHIPU_API_KEY=xxx` | 智谱 GLM |
 | `volcengine` | doubao-seedream | `VOLCENGINE_API_KEY=xxx` | 火山引擎 |
+| `agnes` | agnes-image-2.1-flash | `AGNES_API_KEY=xxx` | Agnes AI，支持图生图 |
 
 例如使用 Gemini（免费）：
 ```bash
@@ -343,7 +344,7 @@ Claude，把已有的项目 /path/to/project 导出为 PPTX
 
 ### 工具 7：`generate_image`
 
-基于 AI 图片生成后端（通过环境变量配置），从文字提示生成图片。支持 17+ 后端：OpenAI、Gemini、Qwen、Zhipu、Volcengine、Stability、BFL 等。
+基于 AI 图片生成后端（通过环境变量配置），从文字提示生成图片。支持 18+ 后端：OpenAI、Gemini、Qwen、Zhipu、Volcengine、Agnes AI、Stability、BFL 等。Agnes AI 后端额外支持图生图（image-to-image）模式。
 
 ```
 Claude，生成一张"日落海滩"的图片，16:9 比例
@@ -365,10 +366,11 @@ claude mcp add --transport stdio \
 | `prompt` | string (必填) | 图片生成提示词 | - |
 | `aspectRatio` | string | 宽高比 | 16:9 |
 | `imageSize` | string | 图片尺寸 (512px/1K/2K/4K) | 1K |
-| `backend` | string | 后端覆盖，如 openai/gemini | 环境变量 IMAGE_BACKEND |
+| `backend` | string | 后端覆盖，如 openai/gemini/agnes | 环境变量 IMAGE_BACKEND |
 | `outputDir` | string | 输出目录 | cwd |
 | `filename` | string | 输出文件名（不含扩展名） | 自动生成 |
 | `model` | string | 模型覆盖 | 后端默认模型 |
+| `referenceImage` | string | 参考图片 URL（图生图，Agnes AI 后端支持） | - |
 | `timeout` | number | 超时(ms) | 120000 |
 
 ### 工具 8：`convert_to_markdown`

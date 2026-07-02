@@ -78,6 +78,7 @@ IMAGE_ENV_PREFIXES = (
     "FAL_",
     "REPLICATE_",
     "OPENROUTER_",
+    "AGNES_",
 )
 DEPRECATED_IMAGE_KEYS = {
     "IMAGE_API_KEY",
@@ -204,6 +205,14 @@ BACKEND_REGISTRY = {
         "label": "OpenRouter",
         "default_model": "google/gemini-3.1-flash-image-preview",
         "key_hint": "OPENROUTER_API_KEY",
+    },
+    "agnes": {
+        "module": "backend_agnes",
+        "tier": "experimental",
+        "label": "Agnes AI",
+        "default_model": "agnes-image-2.1-flash",
+        "key_hint": "AGNES_API_KEY",
+        "aliases": ["agnes-ai", "xunfei", "iflytek"],
     },
 }
 
@@ -743,6 +752,10 @@ def main() -> None:
             "next to the manifest, then exit. No backend / network needed."
         ),
     )
+    parser.add_argument(
+        "--reference_image", default=None,
+        help="Reference image URL for image-to-image generation (supported by agnes backend)."
+    )
 
     args = parser.parse_args()
 
@@ -814,6 +827,7 @@ def main() -> None:
             output_dir=args.output,
             filename=args.filename,
             model=args.model,
+            reference_image=args.reference_image,
         )
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")

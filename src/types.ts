@@ -333,7 +333,7 @@ export interface GenerateImageOptions {
   aspectRatio?: string;
   /** Image size: 512px, 1K, 2K, 4K (default: 1K) */
   imageSize?: string;
-  /** Backend override, e.g. 'openai', 'gemini' */
+  /** Backend override, e.g. 'openai', 'gemini', 'agnes' */
   backend?: string;
   /** Output directory (default: process.cwd()) */
   outputDir?: string;
@@ -341,6 +341,8 @@ export interface GenerateImageOptions {
   filename?: string;
   /** Model override */
   model?: string;
+  /** Reference image URL for image-to-image generation (supported by agnes backend) */
+  referenceImage?: string;
   /** Per-call timeout in milliseconds (default: 120000) */
   timeout?: number;
 }
