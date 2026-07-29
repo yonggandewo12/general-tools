@@ -518,6 +518,9 @@ function buildHtml(
       main { border: 0; box-shadow: none; }
       article { padding: 0; }
       h1 { margin: 0 0 24px; color: #111827; background: none; padding: 0; }
+      h1:not(:first-of-type) { page-break-before: always; }
+      h2 { page-break-before: always; }
+      h1 + h2 { page-break-before: avoid; }
       a { color: inherit; }
       .table-scroll, table { page-break-inside: avoid; }
       img, blockquote, pre { page-break-inside: avoid; box-shadow: none; }
