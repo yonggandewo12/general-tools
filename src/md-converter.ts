@@ -328,6 +328,37 @@ function buildJs(): string {
       addEventListener('scroll', onScroll, { passive: true });
       topBtn?.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
       onScroll();
+
+      // 标记紧跟在 h1 后面、中间只有空白的 h2，避免 PDF 分页
+      function markHeadingContinuations() {
+        const h1s = document.querySelectorAll('article h1, article [role="doc-cover"] h1');
+        h1s.forEach((h1) => {
+          let node = h1.nextSibling;
+          while (node && node.nodeType === Node.TEXT_NODE && /^\\s*$/.test(node.textContent || '')) {
+            node = node.nextSibling;
+          }
+          while (node && node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as Element;
+            if (el.tagName === 'H2') {
+              el.classList.add('no-break-before');
+              break;
+            }
+            // 只跳过空段落、空 div、hr、br 等无内容的分隔元素
+            const isEmpty =
+              el.tagName === 'HR' ||
+              el.tagName === 'BR' ||
+              ((el.tagName === 'P' || el.tagName === 'DIV') &&
+                /^\\s*$/.test(el.textContent || '') &&
+                el.querySelectorAll('img, svg, table, pre, blockquote, iframe, canvas, video, audio, embed, object').length === 0);
+            if (!isEmpty) break;
+            node = node.nextSibling;
+            while (node && node.nodeType === Node.TEXT_NODE && /^\\s*$/.test(node.textContent || '')) {
+              node = node.nextSibling;
+            }
+          }
+        });
+      }
+      markHeadingContinuations();
     })();
   </script>
 `;
@@ -521,6 +552,7 @@ function buildHtml(
       h1:not(:first-of-type) { page-break-before: always; }
       h2 { page-break-before: always; }
       h1 + h2 { page-break-before: avoid; }
+      h2.no-break-before { page-break-before: avoid; }
       a { color: inherit; }
       .table-scroll, table { page-break-inside: avoid; }
       img, blockquote, pre { page-break-inside: avoid; box-shadow: none; }
