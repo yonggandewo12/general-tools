@@ -197,78 +197,6 @@ function titleFromBody(body: string): string {
   return match[1].replace(/<.*?>/g, '').trim() || 'Markdown Report';
 }
 
-// ── Table of contents ──────────────────────────────────────────────
-
-interface TocItem {
-  level: number;
-  text: string;
-  id: string;
-}
-
-function extractTocItems(body: string): TocItem[] {
-  const items: TocItem[] = [];
-  const re = /<h([1-6])\b[^>]*\bid="([^"]*)"[^>]*>(.*?)<\/h\1>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(body)) !== null) {
-    const level = parseInt(m[1], 10);
-    const id = m[2];
-    const text = m[3].replace(/<.*?>/g, '').trim();
-    if (id && text) {
-      items.push({ level, text, id });
-    }
-  }
-  return items;
-}
-
-function buildToc(body: string): string {
-  const items = extractTocItems(body);
-  if (items.length < 2) return '';
-
-  const minLevel = items.reduce((min, it) => Math.min(min, it.level), 6);
-
-  let html = '<nav class="toc" role="doc-toc">\n<h2>目录</h2>\n';
-  const stack: number[] = []; // tracks depth (0-based) of each open <li>
-
-  for (const item of items) {
-    const depth = item.level - minLevel;
-
-    if (stack.length === 0) {
-      html += '<ul>\n<li>';
-      stack.push(depth);
-      html += `<a href="#${item.id}">${escapeHtml(item.text)}</a>`;
-      continue;
-    }
-
-    const top = stack[stack.length - 1];
-
-    if (depth > top) {
-      // Deeper: nest a new <ul> inside the current <li> (don't close it)
-      html += '\n<ul>\n<li>';
-      stack.push(depth);
-    } else {
-      // Pop up to the same depth
-      while (stack.length > 1 && stack[stack.length - 1] > depth) {
-        html += '</li>\n</ul>\n';
-        stack.pop();
-      }
-      // Close previous <li> at the same depth
-      html += '</li>\n<li>';
-      stack[stack.length - 1] = depth;
-    }
-
-    html += `<a href="#${item.id}">${escapeHtml(item.text)}</a>`;
-  }
-
-  // Close all remaining open lists
-  while (stack.length > 0) {
-    html += '</li>\n</ul>\n';
-    stack.pop();
-  }
-
-  html += '</nav>\n';
-  return html;
-}
-
 // ── Mermaid handling ───────────────────────────────────────────────
 
 function renderMermaidBlocks(body: string): { body: string; count: number } {
@@ -445,7 +373,6 @@ function buildHtml(
   mermaidSource: string,
   pdfContentW?: number,
   pdfContentH?: number,
-  tocHtml?: string,
 ): string {
   const progress = withJs ? '<div class="progress"></div>' : '';
   const backTop = withJs
@@ -453,7 +380,6 @@ function buildHtml(
     : '';
   const js = withJs ? buildJs() : '';
   const mermaidJs = buildMermaidJs(mermaidSource, pdfContentW, pdfContentH);
-  const toc = tocHtml || '';
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -502,34 +428,6 @@ function buildHtml(
       overflow: hidden;
     }
     article { padding: 46px min(6vw, 76px) 68px; }
-    .toc {
-      margin: -46px min(-6vw, -76px) 46px;
-      padding: 34px min(6vw, 76px) 32px;
-      background: linear-gradient(135deg, #f8fafc 0%, #eef4f8 100%);
-      border-bottom: 1px solid var(--line);
-      page-break-inside: avoid;
-    }
-    .toc h2 {
-      margin: 0 0 18px;
-      padding: 0;
-      border: 0;
-      font-size: 22px;
-      color: #0f172a;
-    }
-    .toc ul {
-      margin: 0;
-      padding-left: 0;
-      list-style: none;
-    }
-    .toc li { margin: 6px 0; }
-    .toc li > ul { padding-left: 1.4em; margin-top: 6px; }
-    .toc a {
-      display: inline-block;
-      color: var(--accent);
-      font-weight: 500;
-      line-height: 1.5;
-    }
-    .toc a::before { content: '•'; margin-right: 8px; color: var(--accent-2); }
     h1 {
       margin: -46px min(-6vw, -76px) 34px;
       padding: 58px min(6vw, 76px) 44px;
@@ -539,8 +437,6 @@ function buildHtml(
       line-height: 1.14;
       font-weight: 800;
     }
-    h1 + .toc { margin-top: -46px; }
-    .toc + h1 { margin-top: 0; }
     h2 {
       margin: 54px 0 18px;
       padding-top: 8px;
@@ -644,7 +540,6 @@ function buildHtml(
       .layout { padding: 14px; }
       article { padding: 28px 18px 42px; }
       h1 { margin: -28px -18px 28px; padding: 38px 18px 32px; }
-      .toc { margin: -28px -18px 28px; padding: 24px 18px; }
       th, td { min-width: 120px; padding: 10px; }
     }
     @media print {
@@ -653,21 +548,12 @@ function buildHtml(
       .progress, .back-top { display: none !important; }
       main { border: 0; box-shadow: none; }
       article { padding: 0; }
-      .toc {
-        margin: 0 0 32px;
-        padding: 28px 0;
-        background: transparent;
-        border-bottom: 1px solid var(--line);
-      }
-      .toc h2 { font-size: 20px; margin-bottom: 14px; }
       h1 { margin: 0 0 24px; color: #111827; background: none; padding: 0; }
       h1:not(:first-of-type) { page-break-before: always; }
       h2 { page-break-before: always; }
       h1 + h2 { page-break-before: avoid; }
-      .toc + h1 { page-break-before: auto; }
       h2.no-break-before { page-break-before: avoid; }
       a { color: inherit; }
-      .toc a { color: var(--accent-2); }
       .table-scroll, table { page-break-inside: avoid; }
       img, blockquote, pre { page-break-inside: avoid; box-shadow: none; }
       .mermaid {
@@ -683,7 +569,6 @@ function buildHtml(
   <div class="layout">
     <main>
       <article>
-        ${toc}
         ${body}
       </article>
     </main>
@@ -747,6 +632,27 @@ export class MdConverter {
     // 7. Render mermaid blocks
     const { body: bodyWithMermaid, count: mermaidCount } = renderMermaidBlocks(body);
 
+    // 7.5 Fix internal anchor links to match heading ids.
+    // markdown-it may URL-encode Chinese fragments and drop punctuation,
+    // so we build a normalised lookup: strip all non-alphanumeric-CJK chars,
+    // lower-case, then match.
+    const normalizeAnchor = (s: string): string =>
+      decodeURIComponent(s)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]/gu, '');
+
+    const headingIdLookup = new Map<string, string>();
+    for (const m of bodyWithMermaid.matchAll(/<h[1-6]\b[^>]*\bid="([^"]*)"/gi)) {
+      headingIdLookup.set(normalizeAnchor(m[1]), m[1]);
+    }
+    const fixedBody = bodyWithMermaid.replace(
+      /(<a\s+[^>]*href=")#([^"]+)"/gi,
+      (full, prefix, fragment) => {
+        const match = headingIdLookup.get(normalizeAnchor(fragment));
+        return match ? `${prefix}#${match}"` : full;
+      },
+    );
+
     // 8. Determine mermaid source
     let mermaidSource = 'none' as string;
     if (mermaidCount && options.mermaidSource !== 'none') {
@@ -772,24 +678,20 @@ export class MdConverter {
       pdfContentH = Math.round(ph - mt - mb);
     }
 
-    // 10. Build optional table of contents from rendered headings
-    const tocHtml = options.toc !== false ? buildToc(bodyWithMermaid) : '';
-
-    // 11. Build final HTML
-    const title = titleFromBody(bodyWithMermaid);
+    // 10. Build final HTML
+    const title = titleFromBody(fixedBody);
     const fullHtml = buildHtml(
       title,
-      bodyWithMermaid,
+      fixedBody,
       options.withJs || false,
       mermaidSource,
       pdfContentW,
       pdfContentH,
-      tocHtml,
     );
 
-    // 12. Compute stats
-    const tableCount = (bodyWithMermaid.match(/<table[\s>]/g) || []).length;
-    const imageCount = (bodyWithMermaid.match(/<img[\s>]/g) || []).length;
+    // 11. Compute stats
+    const tableCount = (fixedBody.match(/<table[\s>]/g) || []).length;
+    const imageCount = (fixedBody.match(/<img[\s>]/g) || []).length;
 
     return {
       html: fullHtml,
