@@ -354,18 +354,27 @@ describe('OcrService', () => {
         return { ok: false, status: 500 } as Response;
       });
 
-      const result = await ocrService.recognize({
-        apiKey: 'test-key',
-        secretKey: 'test-secret',
-        pdfPath: '/Users/admin/Documents/project/general-tools/sample.pdf',
-        pdfFileNum: 2,
-      });
+      // Create a temp PDF-like file for the test
+      const tmpPdfPath = '/tmp/test-ocr-sample.pdf';
+      const { writeFileSync, unlinkSync, existsSync } = await import('fs');
+      writeFileSync(tmpPdfPath, Buffer.from('PDF test content'));
 
-      expect(result.success).toBe(true);
-      expect(result.text).toBe('PDF Text');
-      expect(capturedBody).toContain('pdf_file=');
-      expect(capturedBody).toContain('pdf_file_num=2');
-      expect(capturedBody).not.toContain('image=');
+      try {
+        const result = await ocrService.recognize({
+          apiKey: 'test-key',
+          secretKey: 'test-secret',
+          pdfPath: tmpPdfPath,
+          pdfFileNum: 2,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.text).toBe('PDF Text');
+        expect(capturedBody).toContain('pdf_file=');
+        expect(capturedBody).toContain('pdf_file_num=2');
+        expect(capturedBody).not.toContain('image=');
+      } finally {
+        if (existsSync(tmpPdfPath)) unlinkSync(tmpPdfPath);
+      }
     });
 
     it('should send ofd_file parameter when ofdPath is provided', async () => {
@@ -444,16 +453,28 @@ describe('OcrService', () => {
         return { ok: false, status: 500 } as Response;
       });
 
-      const result = await ocrService.recognize({
-        apiKey: 'test-key',
-        secretKey: 'test-secret',
-        pdfPath: '/Users/admin/Documents/project/general-tools/sample.pdf',
-        ofdPath: '/tmp/test-ocr-sample.ofd',
-      });
+      // Create temp PDF and OFD files for the test
+      const tmpPdfPath = '/tmp/test-ocr-priority.pdf';
+      const tmpOfdPath = '/tmp/test-ocr-priority.ofd';
+      const { writeFileSync, unlinkSync, existsSync } = await import('fs');
+      writeFileSync(tmpPdfPath, Buffer.from('PDF test content'));
+      writeFileSync(tmpOfdPath, Buffer.from('OFD test content'));
 
-      expect(result.success).toBe(true);
-      expect(capturedBody).toContain('pdf_file=');
-      expect(capturedBody).not.toContain('ofd_file=');
+      try {
+        const result = await ocrService.recognize({
+          apiKey: 'test-key',
+          secretKey: 'test-secret',
+          pdfPath: tmpPdfPath,
+          ofdPath: tmpOfdPath,
+        });
+
+        expect(result.success).toBe(true);
+        expect(capturedBody).toContain('pdf_file=');
+        expect(capturedBody).not.toContain('ofd_file=');
+      } finally {
+        if (existsSync(tmpPdfPath)) unlinkSync(tmpPdfPath);
+        if (existsSync(tmpOfdPath)) unlinkSync(tmpOfdPath);
+      }
     });
 
     it('should send language_type parameter when provided', async () => {
