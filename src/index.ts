@@ -178,6 +178,10 @@ const CONVERT_MD_TO_HTML_TOOL: Tool = {
         type: 'boolean',
         description: 'Add interactive JS for scroll progress and back-to-top button (default: false)'
       },
+      toc: {
+        type: 'boolean',
+        description: 'Automatically generate a table of contents with anchor links (default: true)'
+      },
       mermaidSource: {
         type: 'string',
         enum: ['auto', 'cdn', 'local', 'none'],
@@ -216,6 +220,10 @@ const CONVERT_MD_TO_PDF_TOOL: Tool = {
       withJs: {
         type: 'boolean',
         description: 'Add interactive JS for scroll progress and back-to-top button (default: false)'
+      },
+      toc: {
+        type: 'boolean',
+        description: 'Automatically generate a table of contents with anchor links (default: true)'
       },
       mermaidSource: {
         type: 'string',
@@ -758,6 +766,7 @@ class Md2PdfServer {
             embedImages,
             keepInlineToc,
             withJs,
+            toc,
             mermaidSource,
           } = args as Record<string, unknown>;
 
@@ -782,6 +791,7 @@ class Md2PdfServer {
             embedImages: embedImages as boolean | undefined,
             keepInlineToc: keepInlineToc as boolean | undefined,
             withJs: withJs as boolean | undefined,
+            toc: toc as boolean | undefined,
             mermaidSource: mermaidSource as 'auto' | 'cdn' | 'local' | 'none' | undefined,
           }, baseDir);
 

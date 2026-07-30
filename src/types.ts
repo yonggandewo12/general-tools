@@ -74,6 +74,8 @@ export interface MdToPdfOptions {
   keepInlineToc?: boolean;
   /** Add interactive JS: scroll progress, active TOC, back-to-top (default: false) */
   withJs?: boolean;
+  /** Automatically generate a table of contents with anchor links (default: true) */
+  toc?: boolean;
   /** Mermaid diagram rendering source (default: 'auto') */
   mermaidSource?: 'auto' | 'cdn' | 'local' | 'none';
 
