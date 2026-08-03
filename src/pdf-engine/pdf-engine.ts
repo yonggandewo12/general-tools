@@ -80,6 +80,8 @@ export async function parseDocument(
     }
 
     // 输出格式化
+    // pageCount 反映本次实际解析并返回的页数（与 targetPages/maxPages 选取范围一致，
+    // 单页失败已在 pdf-source 跳过并告警），便于调用方判断返回内容规模。
     const result: ParseDocumentResult = {
       success: true,
       pageCount: parsed.pages.length,
@@ -89,11 +91,13 @@ export async function parseDocument(
     if (format === 'text') {
       result.text = doc.pages.map((p) => p.blocks.map((b) => b.text).join('\n')).join('\n\n');
     } else if (format === 'markdown') {
-      result.markdown = renderMarkdown(doc, options.markdown);
-      // 与 markdown-renderer 的图片编号保持一致（按阅读顺序），供调用方落盘
+      // 先编码图片：编码失败的 image block 会被清除 image 字段，
+      // 随后 renderMarkdown 只对保留的 image block 编号，保证 markdown 引用
+      // 与 result.images 的文件名/编号严格一致，不会出现引用缺失或错位。
       if ((options.markdown?.imageOutput ?? 'external') !== 'off') {
         result.images = await collectImages(doc);
       }
+      result.markdown = renderMarkdown(doc, options.markdown);
     } else {
       result.json = renderJson(doc);
     }
@@ -148,17 +152,24 @@ function mergeParagraphTables(blocks: TextBlock[]): TextBlock[] {
   return out;
 }
 
-// 按 markdown-renderer 相同的遍历顺序收集图片，编号 img-N.png 保持一致
+// 按 markdown-renderer 相同的遍历顺序收集图片，编号 img-N.png 保持一致。
+// 编码失败的 image block 会被置空 b.image，使后续 renderMarkdown 跳过它，
+// 从而 markdown 引用与落盘文件一一对应、编号连续无错位。
 async function collectImages(doc: PdfDocument): Promise<ParsedImage[]> {
   const out: ParsedImage[] = [];
   let count = 0;
   for (const page of doc.pages) {
     for (const b of page.blocks) {
       if (b.type !== 'image' || !b.image) continue;
-      count++;
       const img = b.image;
       const png = await encodePng(img.pixelWidth, img.pixelHeight, img.kind, img.data);
-      if (png) out.push({ filename: `img-${count}.png`, data: png });
+      if (png) {
+        count++;
+        out.push({ filename: `img-${count}.png`, data: png });
+      } else {
+        // 编码失败：清除引用，renderMarkdown 将跳过该块，编号不前移
+        b.image = undefined;
+      }
     }
   }
   return out;

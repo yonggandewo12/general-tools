@@ -22,7 +22,8 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let index = 0;
-  const workers = Array.from({ length: concurrency }, async () => {
+  // 并发数至少为 1，避免传入 0/负数时 workers 为空导致 results 全为 undefined
+  const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     while (index < items.length) {
       const i = index++;
       results[i] = await fn(items[i]);

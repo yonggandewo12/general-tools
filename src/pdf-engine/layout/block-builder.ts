@@ -30,10 +30,14 @@ export function buildBlocks(lines: TextLine[]): TextBlock[] {
     if (gap <= gapTolerance && sizeDiff < SIZE_RATIO && !styleTransition && xOverlap) {
       last.lines.push(ln);
       last.text += '\n' + ln.text;
-      last.y = Math.min(last.y, ln.y);
+      // 先用旧 x/y 计算右/下边缘，再更新 x/y，最后重算 width/height，
+      // 避免先用 min 更新 x/y 后再用新 x/y 算 width/height 导致包围盒缩小。
+      const right = Math.max(last.x + last.width, ln.x + ln.width);
+      const bottom = Math.max(last.y + last.height, ln.y + ln.height);
       last.x = Math.min(last.x, ln.x);
-      last.width = Math.max(last.width, ln.x + ln.width - last.x);
-      last.height = Math.max(last.height, ln.y + ln.height - last.y);
+      last.y = Math.min(last.y, ln.y);
+      last.width = right - last.x;
+      last.height = bottom - last.y;
     } else {
       blocks.push(newBlock(ln));
     }

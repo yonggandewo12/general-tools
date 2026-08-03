@@ -64,6 +64,21 @@ describe('block-builder', () => {
     expect(blocks[0].width).toBe(100);
   });
 
+  it('does not shrink bbox when a new line extends left but not right', () => {
+    // Old code updated last.x = min(...) BEFORE computing width, so
+    // width = max(old_w, ln.x + ln.w - new_x) used the already-shrunk x,
+    // yielding 50 instead of the correct 58 (right=130 minus left=72).
+    const lines = [
+      makeLine({ text: 'A', y: 100, x: 80, width: 50 }),
+      makeLine({ text: 'B', y: 120, x: 72, width: 10 }),
+    ];
+    const blocks = buildBlocks(lines);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].x).toBe(72);
+    expect(blocks[0].width).toBe(58);
+    expect(blocks[0].height).toBe(32);
+  });
+
   it('does not merge lines from adjacent columns', () => {
     const lines = [
       makeLine({ text: 'Left col', y: 100, x: 72, width: 80 }),

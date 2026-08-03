@@ -53,9 +53,12 @@ export async function encodePng(
 ): Promise<Uint8Array | null> {
   if (width <= 0 || height <= 0 || data.length === 0) return null;
 
+  // 1bpp 每行按字节对齐（rowStride = ceil(width/8)），总字节 = height * rowStride；
+  // 不能用 ceil(width*height/8)，否则在 width 非 8 倍数时会低估所需字节，
+  // 导致越界读取（data[index] 为 undefined）或错误放行不完整数据。
   const expectedBytes =
     kind === ImageKind.GRAYSCALE_1BPP
-      ? Math.ceil((width * height) / 8)
+      ? height * Math.ceil(width / 8)
       : kind === ImageKind.RGB_24BPP
         ? width * height * 3
         : kind === ImageKind.RGBA_32BPP

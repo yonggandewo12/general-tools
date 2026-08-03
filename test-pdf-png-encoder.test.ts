@@ -25,6 +25,13 @@ describe('png-encoder', () => {
     expect(png).not.toBeNull();
   });
 
+  it('rejects 1bpp data sized by the old wrong byte formula', async () => {
+    // width=9, height=2: old formula ceil(9*2/8)=3, correct = 2*ceil(9/8)=4.
+    // 3 bytes passes the old check but causes OOB reads in the loop.
+    const data = new Uint8Array(3);
+    expect(await encodePng(9, 2, ImageKind.GRAYSCALE_1BPP, data)).toBeNull();
+  });
+
   it('returns null for incomplete data', async () => {
     expect(await encodePng(2, 2, ImageKind.RGBA_32BPP, new Uint8Array(4))).toBeNull();
   });
