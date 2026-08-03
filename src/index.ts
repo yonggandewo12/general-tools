@@ -360,7 +360,7 @@ const RECOGNIZE_TEXT_TOOL: Tool = {
 
 const EXTRACT_PDF_TEXT_TOOL: Tool = {
   name: 'extract_pdf_text',
-  description: 'Extract text from PDF files using LiteParse (PDFium-based). Supports text, JSON, and Markdown output formats. Optional OCR for scanned documents. Runs entirely locally with no cloud dependencies.',
+  description: 'Extract text, JSON, or Markdown from PDF files using layout-aware engine. Detects headings, tables, lists, and reading order. Scanned pages are flagged.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -371,36 +371,15 @@ const EXTRACT_PDF_TEXT_TOOL: Tool = {
       outputFormat: {
         type: 'string',
         enum: ['text', 'json', 'markdown'],
-        description: 'Output format (default: text). "markdown" includes headings, tables, lists, images, and links.'
+        description: 'Output format (default: text). "markdown" includes headings, tables, lists, and reading order.'
       },
       targetPages: {
         type: 'string',
         description: 'Pages to extract, e.g. "1-5,10,15-20" (default: all pages)'
       },
-      ocrEnabled: {
-        type: 'boolean',
-        description: 'Enable OCR for scanned documents (default: false)'
-      },
-      ocrLanguage: {
-        type: 'string',
-        description: 'OCR language in Tesseract format (default: eng). Examples: eng, chi_sim, jpn, kor, fra, deu'
-      },
-      ocrServerUrl: {
-        type: 'string',
-        description: 'HTTP OCR server URL (optional, uses built-in Tesseract if not provided)'
-      },
       maxPages: {
         type: 'number',
         description: 'Maximum number of pages to parse (default: 1000)'
-      },
-      dpi: {
-        type: 'number',
-        description: 'Rendering DPI (default: 150)'
-      },
-      imageMode: {
-        type: 'string',
-        enum: ['off', 'placeholder', 'embed'],
-        description: 'Markdown image handling: "off" strips images, "placeholder" emits references, "embed" writes to disk (default: off)'
       },
       password: {
         type: 'string',

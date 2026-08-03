@@ -8,3 +8,7 @@ dist/
 /ppt-master/
 /.arts/
 /SenseNova-Skills/
+.tmp-fixtures/
+/opendataloader-pdf/
+__pycache__/
+*.pyc

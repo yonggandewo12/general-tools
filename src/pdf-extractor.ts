@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { parseDocument } from './pdf-engine/index.js';
 import {
   PdfExtractOptions,
   PdfExtractResult,
@@ -31,32 +32,25 @@ export class PdfExtractor {
       const pdfFilePath = path.resolve(options.pdfPath);
       await fs.access(pdfFilePath);
 
-      const LiteParse = await getLiteParse();
-      const parser = new LiteParse({
+      const result = await parseDocument(pdfFilePath, {
         outputFormat: options.outputFormat ?? 'text',
-        targetPages: options.targetPages,
-        ocrEnabled: options.ocrEnabled ?? false,
-        ocrLanguage: options.ocrLanguage,
-        ocrServerUrl: options.ocrServerUrl,
+        targetPages: options.targetPages ? parsePages(options.targetPages) : undefined,
         maxPages: options.maxPages,
-        dpi: options.dpi,
-        imageMode: options.imageMode ?? 'off',
         password: options.password,
-        quiet: true,
       });
 
-      const result = await parser.parse(pdfFilePath);
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error,
+          details: { processingTime: Date.now() - start },
+        };
+      }
 
       return {
         success: true,
-        text: result.text,
-        pages: result.pages.map((p) => ({
-          pageNum: p.pageNum,
-          width: p.width,
-          height: p.height,
-          text: p.text,
-        })),
-        pageCount: result.pages.length,
+        text: result.text ?? result.markdown ?? (result.json ? JSON.stringify(result.json) : ''),
+        pageCount: result.pageCount,
         details: { processingTime: Date.now() - start },
       };
     } catch (error) {
@@ -89,7 +83,7 @@ export class PdfExtractor {
 
       let pageNumbers: number[] | undefined;
       if (options.targetPages) {
-        pageNumbers = this.parseTargetPages(options.targetPages);
+        pageNumbers = parsePages(options.targetPages);
       }
 
       const results = await parser.screenshot(pdfFilePath, pageNumbers);
@@ -119,20 +113,39 @@ export class PdfExtractor {
       };
     }
   }
+}
 
-  private parseTargetPages(targetPages: string): number[] {
-    const pages: number[] = [];
-    for (const part of targetPages.split(',')) {
-      const trimmed = part.trim();
-      if (trimmed.includes('-')) {
-        const [start, end] = trimmed.split('-').map(Number);
-        for (let i = start; i <= end; i++) {
+function parsePages(spec: string): number[] {
+  const pages: number[] = [];
+  const seen = new Set<number>();
+  for (const part of spec.split(',')) {
+    const trimmed = part.trim();
+    if (!trimmed) throw new Error(`Invalid page range: "${spec}"`);
+    if (trimmed.includes('-')) {
+      const dash = trimmed.indexOf('-');
+      const startRaw = trimmed.slice(0, dash);
+      const endRaw = trimmed.slice(dash + 1);
+      if (!startRaw || !endRaw) throw new Error(`Invalid page range: "${spec}"`);
+      const start = Number(startRaw);
+      const end = Number(endRaw);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) {
+        throw new Error(`Invalid page range: "${spec}"`);
+      }
+      if (start > end) throw new Error(`Invalid page range (start > end): "${spec}"`);
+      for (let i = start; i <= end; i++) {
+        if (!seen.has(i)) {
+          seen.add(i);
           pages.push(i);
         }
-      } else {
-        pages.push(Number(trimmed));
+      }
+    } else {
+      const n = Number(trimmed);
+      if (!Number.isInteger(n) || n < 1) throw new Error(`Invalid page range: "${spec}"`);
+      if (!seen.has(n)) {
+        seen.add(n);
+        pages.push(n);
       }
     }
-    return pages;
   }
+  return pages;
 }

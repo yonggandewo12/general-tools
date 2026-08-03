@@ -196,10 +196,9 @@ export interface OcrResult {
   details?: { processingTime: number };
 }
 
-// === PDF Text Extraction (LiteParse) ===
+// === PDF Text Extraction ===
 
 export type PdfOutputFormat = 'text' | 'json' | 'markdown';
-export type PdfImageMode = 'off' | 'placeholder' | 'embed';
 
 export interface PdfExtractOptions {
   /** 本地 PDF 文件路径（必选） */
@@ -208,33 +207,15 @@ export interface PdfExtractOptions {
   outputFormat?: PdfOutputFormat;
   /** 页码范围，如 "1-5,10,15-20" */
   targetPages?: string;
-  /** 是否启用 OCR（默认 false） */
-  ocrEnabled?: boolean;
-  /** OCR 语言，Tesseract 格式（默认 eng） */
-  ocrLanguage?: string;
-  /** HTTP OCR 服务地址（可选） */
-  ocrServerUrl?: string;
   /** 最大解析页数（默认 1000） */
   maxPages?: number;
-  /** 渲染 DPI（默认 150） */
-  dpi?: number;
-  /** Markdown 图片处理模式（默认 off） */
-  imageMode?: PdfImageMode;
   /** 加密 PDF 密码（可选） */
   password?: string;
-}
-
-export interface PdfExtractPage {
-  pageNum: number;
-  width: number;
-  height: number;
-  text: string;
 }
 
 export interface PdfExtractResult {
   success: boolean;
   text?: string;
-  pages?: PdfExtractPage[];
   pageCount?: number;
   error?: string;
   details?: { processingTime: number };

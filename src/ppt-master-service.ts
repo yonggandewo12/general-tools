@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { PythonScriptRunner } from './python-runner.js';
+import { parseDocument } from './pdf-engine/index.js';
 import {
   GeneratePresentationOptions,
   GeneratePresentationResult,
@@ -12,7 +13,7 @@ import {
 } from './types.js';
 
 const PRESENTATION_DEPS = ['pptx', 'svglib', 'reportlab', 'PIL'];
-const MARKDOWN_DEPS = ['fitz', 'mammoth', 'markdownify', 'openpyxl', 'pptx', 'PIL', 'requests', 'bs4'];
+const MARKDOWN_DEPS = ['mammoth', 'markdownify', 'openpyxl', 'pptx', 'PIL', 'requests', 'bs4'];
 
 export class PptMasterService {
   private runner: PythonScriptRunner;
@@ -293,13 +294,21 @@ export class PptMasterService {
   async convertToMarkdown(options: ConvertToMarkdownOptions): Promise<ConvertToMarkdownResult> {
     const start = Date.now();
     try {
+      const sourceType = options.sourceType ?? this.detectSourceType(options.source);
+
+      // PDF 分支走纯 JS 引擎，不依赖 Python
+      if (sourceType === 'pdf') {
+        const outputPath = await this.resolveMarkdownOutputPath(options, sourceType);
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+        return await this.convertPdfToMarkdown(options, outputPath, start);
+      }
+
       await this.runner.checkPython();
       const missing = await this.runner.checkPackages(MARKDOWN_DEPS);
       if (missing.length > 0) {
         throw new Error(this.runner.formatMissingPackages(missing));
       }
 
-      const sourceType = options.sourceType ?? this.detectSourceType(options.source);
       const outputPath = await this.resolveMarkdownOutputPath(options, sourceType);
       await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
@@ -307,13 +316,6 @@ export class PptMasterService {
       let args: string[];
 
       switch (sourceType) {
-        case 'pdf':
-          script = 'source_to_md/pdf_to_md.py';
-          args = [path.resolve(options.source), '-o', outputPath];
-          if (options.pdfImages) args.push('--images', options.pdfImages);
-          if (options.renderVectorFigures) args.push('--render-vector-figures');
-          if (options.vectorFigureDpi) args.push('--vector-figure-dpi', String(options.vectorFigureDpi));
-          break;
         case 'doc':
           script = 'source_to_md/doc_to_md.py';
           args = [path.resolve(options.source), '-o', outputPath];
@@ -383,8 +385,12 @@ export class PptMasterService {
     return path.join(parsed.dir, `${parsed.name}.md`);
   }
 
+  private deriveAssetDir(markdownPath: string): string {
+    return markdownPath.replace(/\.md$/i, '_files');
+  }
+
   private async locateAssetsDir(markdownPath: string): Promise<string | undefined> {
-    const candidate = markdownPath.replace(/\.md$/i, '_files');
+    const candidate = this.deriveAssetDir(markdownPath);
     try {
       const stat = await fs.stat(candidate);
       if (stat.isDirectory()) return candidate;
@@ -392,5 +398,47 @@ export class PptMasterService {
       // no companion assets
     }
     return undefined;
+  }
+
+  private async convertPdfToMarkdown(
+    options: ConvertToMarkdownOptions,
+    outputPath: string,
+    start: number,
+  ): Promise<ConvertToMarkdownResult> {
+    const pdfPath = path.resolve(options.source);
+    const imageOutput = options.pdfImages ?? 'filtered';
+    const assetBase = this.deriveAssetDir(outputPath);
+    const assetsDir = imageOutput === 'none' ? undefined : assetBase;
+
+    const result = await parseDocument(pdfPath, {
+      outputFormat: 'markdown',
+      markdown: {
+        imageOutput: imageOutput === 'none' ? 'off' : 'external',
+        // Markdown 引用用相对路径（与 md 文件同目录的 _files 目录）
+        imageBasePath: assetsDir ? path.basename(assetsDir) : undefined,
+      },
+    });
+
+    if (!result.success) {
+      throw new Error(result.error ?? 'PDF to Markdown failed');
+    }
+
+    let assetCount: number | undefined;
+    if (assetsDir && result.images && result.images.length > 0) {
+      await fs.mkdir(assetsDir, { recursive: true });
+      await Promise.all(
+        result.images.map((img) => fs.writeFile(path.join(assetsDir, img.filename), img.data))
+      );
+      assetCount = result.images.length;
+    }
+
+    await fs.writeFile(outputPath, result.markdown ?? '', 'utf-8');
+
+    return {
+      success: true,
+      markdownPath: outputPath,
+      assetsDir,
+      details: { processingTime: Date.now() - start, sourceType: 'pdf', assetCount },
+    };
   }
 }
