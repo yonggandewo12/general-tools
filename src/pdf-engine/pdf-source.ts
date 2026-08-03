@@ -14,6 +14,24 @@ export interface ParseOptions {
 const IMAGE_RESOLVE_TIMEOUT = 5000;
 const OPS = pdfjsLib.OPS;
 
+// 限制并发数执行异步任务，保持结果顺序
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let index = 0;
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 // 判断字体是否粗体：启发式匹配常见粗体关键字
 function isBoldName(fontName: string): boolean {
   return /bold|black|heavy|semibold|demibold/i.test(fontName);
@@ -62,13 +80,12 @@ export async function parsePdf(
 
   try {
     const pageCount = pdf.numPages;
-    const pages: RawPage[] = [];
 
     const pageNums = options.targetPages && options.targetPages.length > 0
       ? options.targetPages.filter((p) => p >= 1 && p <= pageCount)
       : Array.from({ length: Math.min(pageCount, options.maxPages ?? 1000) }, (_, i) => i + 1);
 
-    for (const pageNum of pageNums) {
+    const rawPages = await mapWithConcurrency(pageNums, 4, async (pageNum) => {
       try {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1 });
@@ -100,18 +117,20 @@ export async function parsePdf(
         const images = options.extractImages === false
           ? []
           : await extractImages(page, viewport);
-        pages.push({
+        return {
           pageNum,
           width: viewport.width,
           height: viewport.height,
           items,
           images,
-        });
+        };
       } catch (err) {
         // 单页解析失败：跳过该页，不中断整体
         console.warn(`[pdf-source] page ${pageNum} skipped: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
       }
-    }
+    });
+    const pages = rawPages.filter((p): p is RawPage => p !== null);
 
     return { pageCount, pages };
   } finally {

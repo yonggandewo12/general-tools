@@ -92,7 +92,7 @@ export async function parseDocument(
       result.markdown = renderMarkdown(doc, options.markdown);
       // 与 markdown-renderer 的图片编号保持一致（按阅读顺序），供调用方落盘
       if ((options.markdown?.imageOutput ?? 'external') !== 'off') {
-        result.images = collectImages(doc);
+        result.images = await collectImages(doc);
       }
     } else {
       result.json = renderJson(doc);
@@ -149,7 +149,7 @@ function mergeParagraphTables(blocks: TextBlock[]): TextBlock[] {
 }
 
 // 按 markdown-renderer 相同的遍历顺序收集图片，编号 img-N.png 保持一致
-function collectImages(doc: PdfDocument): ParsedImage[] {
+async function collectImages(doc: PdfDocument): Promise<ParsedImage[]> {
   const out: ParsedImage[] = [];
   let count = 0;
   for (const page of doc.pages) {
@@ -157,7 +157,7 @@ function collectImages(doc: PdfDocument): ParsedImage[] {
       if (b.type !== 'image' || !b.image) continue;
       count++;
       const img = b.image;
-      const png = encodePng(img.pixelWidth, img.pixelHeight, img.kind, img.data);
+      const png = await encodePng(img.pixelWidth, img.pixelHeight, img.kind, img.data);
       if (png) out.push({ filename: `img-${count}.png`, data: png });
     }
   }

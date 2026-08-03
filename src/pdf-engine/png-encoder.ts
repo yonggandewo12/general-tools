@@ -1,4 +1,7 @@
-import { deflateSync } from 'zlib';
+import { deflate as deflateCb } from 'zlib';
+import { promisify } from 'util';
+
+const deflate = promisify(deflateCb);
 
 // pdfjs ImageKind 常量（与 pdfjs-dist 一致）
 export const ImageKind = {
@@ -42,12 +45,12 @@ function chunk(type: string, data: Buffer): Buffer {
  * kind 取值见 ImageKind：1=1bpp 灰度、2=RGB24、3=RGBA32。
  * 返回 null 表示数据不完整，调用方应跳过该图。
  */
-export function encodePng(
+export async function encodePng(
   width: number,
   height: number,
   kind: number,
   data: Uint8Array | Uint8ClampedArray,
-): Uint8Array | null {
+): Promise<Uint8Array | null> {
   if (width <= 0 || height <= 0 || data.length === 0) return null;
 
   const expectedBytes =
@@ -97,7 +100,7 @@ export function encodePng(
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // color type: RGBA
-  const idat = deflateSync(rgba, { level: 6 });
+  const idat = await deflate(rgba, { level: 6 });
 
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return new Uint8Array(
