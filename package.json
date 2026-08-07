@@ -8,7 +8,8 @@
   },
   "files": [
     "dist",
-    "scripts/ppt-master"
+    "scripts/ppt-master",
+    "scripts/excel"
   ],
   "scripts": {
     "build": "tsc",

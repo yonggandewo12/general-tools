@@ -22,6 +22,7 @@
 - **PPT 生成** — 将 AI 生成的 SVG 幻灯片导出为原生可编辑 PPTX，支持动画与切换效果
 - **AI 图片生成** — 对接 18+ 后端（OpenAI、Gemini、Qwen、Agnes AI 等），支持文生图和图生图
 - **文档转 Markdown** — PDF、DOCX、Excel、PowerPoint、网页 → 结构化 Markdown
+- **Excel 操作** — 创建/读写工作簿、格式化、公式、合并、图表、透视汇总表、原生 Table、行列增删、数据验证（25 个工具，基于 openpyxl）
 
 ---
 
@@ -60,8 +61,10 @@ npm run build
 # 安装 Python 依赖（PPT/图片生成/文档转换功能需要）
 # macOS（PEP 668 保护）需要 --break-system-packages 参数
 python3.12 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
+python3.12 -m pip install --break-system-packages -r scripts/excel/requirements.txt
 # 如果系统 python3 已是 3.10+：
 # python3 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
+# python3 -m pip install --break-system-packages -r scripts/excel/requirements.txt
 ```
 
 ### 第三步：配置 Claude Code MCP
@@ -94,7 +97,7 @@ claude mcp add general-tools \
 > - **Claude Code（项目级）：** `.claude.json`
 > - **Claude Desktop：** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-配置后重启 Claude Code，执行 `claude mcp list` 应看到 10 个工具。
+配置后重启 Claude Code，执行 `claude mcp list` 应看到 35 个工具（10 个通用 + 25 个 Excel）。
 
 ### 第四步（可选）：配置扩展功能的环境变量
 
@@ -394,6 +397,32 @@ Claude，把 https://example.com 转为 Markdown
 | `pdfImages` | enum | PDF 图片提取 (all/filtered/none) | filtered |
 | `renderVectorFigures` | boolean | 渲染 PDF 矢量图为 PNG | false |
 | `vectorFigureDpi` | number | 矢量图渲染 DPI | 150 |
+
+### 工具 9–33：Excel 操作（`excel_*`）
+
+25 个工具，基于 openpyxl（Python 子进程）的完整 Excel 操作能力。所有工具以 `excel_` 前缀，`filepath` 接受绝对或相对路径。
+
+| 工具 | 说明 |
+|------|------|
+| `excel_create_workbook` | 创建新工作簿 |
+| `excel_create_worksheet` | 新建工作表 |
+| `excel_get_workbook_metadata` | 工作簿元数据（工作表列表、大小、使用范围） |
+| `excel_write_data` | 写入二维数据（自动建表） |
+| `excel_read_data` | 读取范围数据（含单元格元数据与验证规则） |
+| `excel_apply_formula` | 应用公式（校验语法、拦截危险函数） |
+| `excel_validate_formula` | 校验公式语法 |
+| `excel_format_range` | 格式化（字体/填充/边框/对齐/数字格式/条件格式/合并/保护） |
+| `excel_merge_cells` / `excel_unmerge_cells` / `excel_get_merged_cells` | 合并单元格操作 |
+| `excel_create_chart` | 创建图表（line/bar/pie/scatter/area） |
+| `excel_create_pivot_table` | 创建透视汇总表（sum/average/count/min/max） |
+| `excel_create_table` | 创建原生 Excel Table（带样式） |
+| `excel_copy_worksheet` / `excel_delete_worksheet` / `excel_rename_worksheet` | 工作表操作 |
+| `excel_copy_range` / `excel_delete_range` | 范围复制/删除（保留样式） |
+| `excel_validate_range` | 校验范围边界 |
+| `excel_get_data_validation` | 查询数据验证规则 |
+| `excel_insert_rows` / `excel_insert_columns` / `excel_delete_rows` / `excel_delete_columns` | 行列增删 |
+
+> **依赖**：需安装 `pip install -r scripts/excel/requirements.txt`（openpyxl）。Python 路径自动探测，可用 `PPT_MASTER_PYTHON` 覆盖。
 | `timeout` | number | 超时(ms) | 120000 |
 
 ---

@@ -12,3 +12,5 @@ dist/
 /opendataloader-pdf/
 __pycache__/
 *.pyc
+/excel-mcp-server/
+scripts/excel/.venv/

@@ -15,12 +15,15 @@ import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExt
 import { OcrService } from './ocr-service.js';
 import { PdfExtractor } from './pdf-extractor.js';
 import { PptMasterService } from './ppt-master-service.js';
+import { ExcelService } from './excel-service.js';
+import { EXCEL_TOOLS, EXCEL_ACTION_MAP } from './excel-tools.js';
 
 const converter = new PdfConverter();
 const mdConverter = new MdConverter();
 const ocrService = new OcrService();
 const pdfExtractor = new PdfExtractor();
 const pptMasterService = new PptMasterService();
+const excelService = new ExcelService();
 
 const CONVERT_HTML_TO_PDF_TOOL: Tool = {
   name: 'convert_html_to_pdf',
@@ -619,7 +622,7 @@ class Md2PdfServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL, GENERATE_PRESENTATION_TOOL, GENERATE_IMAGE_TOOL, CONVERT_TO_MARKDOWN_TOOL]
+        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL, GENERATE_PRESENTATION_TOOL, GENERATE_IMAGE_TOOL, CONVERT_TO_MARKDOWN_TOOL, ...EXCEL_TOOLS]
       };
     });
 
@@ -1073,6 +1076,22 @@ class Md2PdfServer {
         try {
           const options = args as unknown as ConvertToMarkdownOptions;
           const result = await pptMasterService.convertToMarkdown(options);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            isError: !result.success,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+
+      const excelAction = EXCEL_ACTION_MAP[name];
+      if (excelAction) {
+        try {
+          const result = await excelService.call(excelAction, (args as Record<string, unknown>) ?? {});
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,

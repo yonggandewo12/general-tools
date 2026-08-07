@@ -7,6 +7,8 @@ export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
+  /** 若提供，将通过子进程 stdin 写入该字符串（避免命令行参数长度限制） */
+  stdin?: string;
 }
 
 export interface RunResult {
@@ -42,9 +44,10 @@ export class PythonScriptRunner {
   readonly pythonExecutable: string;
   readonly scriptsRoot: string;
 
-  constructor(pythonExecutable?: string) {
+  constructor(pythonExecutable?: string, scriptsRootOverride?: string) {
     this.pythonExecutable = pythonExecutable ?? findPython();
-    this.scriptsRoot = path.join(this.resolvePackageRoot(), 'scripts', 'ppt-master', 'scripts');
+    this.scriptsRoot =
+      scriptsRootOverride ?? path.join(this.resolvePackageRoot(), 'scripts', 'ppt-master', 'scripts');
   }
 
   private resolvePackageRoot(): string {
@@ -98,6 +101,14 @@ export class PythonScriptRunner {
     return this.runRaw([script, ...args], options);
   }
 
+  /** 运行任意绝对路径的 Python 脚本（不局限于 scriptsRoot）。 */
+  async runPath(absoluteScript: string, args: string[], options?: RunOptions): Promise<RunResult> {
+    if (!existsSync(absoluteScript)) {
+      throw new Error(`Python script not found: ${absoluteScript}`);
+    }
+    return this.runRaw([absoluteScript, ...args], options);
+  }
+
   private runRaw(args: string[], options?: RunOptions): Promise<RunResult> {
     return new Promise((resolve, reject) => {
       const cwd = options?.cwd ?? process.cwd();
@@ -117,18 +128,27 @@ export class PythonScriptRunner {
         }
       }
 
+      const hasStdin = options?.stdin !== undefined;
       const child = spawn(this.pythonExecutable, args, {
         cwd,
         env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [hasStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       });
 
       let stdout = '';
       let stderr = '';
-      child.stdout.setEncoding('utf-8');
-      child.stderr.setEncoding('utf-8');
-      child.stdout.on('data', (chunk: string) => (stdout += chunk));
-      child.stderr.on('data', (chunk: string) => (stderr += chunk));
+      if (child.stdout) {
+        child.stdout.setEncoding('utf-8');
+        child.stdout.on('data', (chunk: string) => (stdout += chunk));
+      }
+      if (child.stderr) {
+        child.stderr.setEncoding('utf-8');
+        child.stderr.on('data', (chunk: string) => (stderr += chunk));
+      }
+
+      if (hasStdin && child.stdin) {
+        child.stdin.end(options!.stdin!);
+      }
 
       const timeoutMs = options?.timeoutMs ?? 120000;
       const timeout = setTimeout(() => {
