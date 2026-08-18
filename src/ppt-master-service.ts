@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import type { Format } from '@firecrawl/anydoc';
 import { PythonScriptRunner } from './python-runner.js';
 import { parseDocument } from './pdf-engine/index.js';
 import {
@@ -14,6 +15,33 @@ import {
 
 const PRESENTATION_DEPS = ['pptx', 'svglib', 'reportlab', 'PIL'];
 const MARKDOWN_DEPS = ['mammoth', 'markdownify', 'openpyxl', 'pptx', 'PIL', 'requests', 'bs4'];
+
+// anydoc 通过 napi-rs 加载 native binary，若系统库缺失或平台不支持，
+// 加载会抛异常。要求整个 MCP server 启动时仍可用，因此改为按需动态 import。
+// 加载失败时强制走 Python fallback（详见 README "安装" 段）。
+type AnydocApi = {
+  formatFromExtension: (ext: string) => Format | null;
+  toDocument: (bytes: Uint8Array, format: Format) => Promise<{ assets: Array<{ id: number; mediaType: string; data: Buffer }> }>;
+  toMarkdownBytes: (bytes: Uint8Array, format: Format) => Promise<string>;
+};
+let anydocApi: AnydocApi | null = null;
+let anydocLoadError: Error | null = null;
+async function loadAnydoc(): Promise<AnydocApi | null> {
+  if (anydocApi) return anydocApi;
+  if (anydocLoadError) return null;
+  try {
+    const mod = await import('@firecrawl/anydoc');
+    anydocApi = {
+      formatFromExtension: mod.formatFromExtension as AnydocApi['formatFromExtension'],
+      toDocument: mod.toDocument as AnydocApi['toDocument'],
+      toMarkdownBytes: mod.toMarkdownBytes as AnydocApi['toMarkdownBytes'],
+    };
+    return anydocApi;
+  } catch (error) {
+    anydocLoadError = error instanceof Error ? error : new Error(String(error));
+    return null;
+  }
+}
 
 export class PptMasterService {
   private runner: PythonScriptRunner;
@@ -294,7 +322,9 @@ export class PptMasterService {
   async convertToMarkdown(options: ConvertToMarkdownOptions): Promise<ConvertToMarkdownResult> {
     const start = Date.now();
     try {
-      const sourceType = options.sourceType ?? this.detectSourceType(options.source);
+      const sourceType = options.sourceType && options.sourceType !== 'auto'
+        ? options.sourceType
+        : this.detectSourceType(options.source);
 
       // PDF 分支走纯 JS 引擎，不依赖 Python
       if (sourceType === 'pdf') {
@@ -303,57 +333,33 @@ export class PptMasterService {
         return await this.convertPdfToMarkdown(options, outputPath, start);
       }
 
-      await this.runner.checkPython();
-      const missing = await this.runner.checkPackages(MARKDOWN_DEPS);
-      if (missing.length > 0) {
-        throw new Error(this.runner.formatMissingPackages(missing));
-      }
-
       const outputPath = await this.resolveMarkdownOutputPath(options, sourceType);
       await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-      let script: string;
-      let args: string[];
-
-      switch (sourceType) {
-        case 'doc':
-          script = 'source_to_md/doc_to_md.py';
-          args = [path.resolve(options.source), '-o', outputPath];
-          break;
-        case 'excel':
-          script = 'source_to_md/excel_to_md.py';
-          args = [path.resolve(options.source), '-o', outputPath];
-          if (options.maxRows !== undefined) args.push('--max-rows', String(options.maxRows));
-          if (options.maxCols !== undefined) args.push('--max-cols', String(options.maxCols));
-          break;
-        case 'ppt':
-          script = 'source_to_md/ppt_to_md.py';
-          args = [path.resolve(options.source), '-o', outputPath];
-          break;
-        case 'web':
-          script = 'source_to_md/web_to_md.py';
-          args = [options.source, '-o', outputPath];
-          break;
-        default:
-          throw new Error(`Unsupported source type: ${sourceType}`);
+      // Office 文档优先走 anydoc 纯 Rust 内核（免 Python/pandoc、毫秒级）。
+      // 仅在文档本身无法转换（加密/不支持/损坏）时回退 Python 脚本。
+      // 三个不回 anydoc 的分支：
+      //   a) URL 源码（会 fs.readFile 一个不存在的路径）→ 强制 web/回退分支；
+      //   b) Excel 指定 maxRows/maxCols（anydoc 无截断能力）→ 走 Python excel_to_md.py；
+      //   c) anydoc 库加载失败（napi binary）→ 强制 Python fallback，server 仍可用。
+      const limitedExcel =
+        sourceType === 'excel' && (options.maxRows !== undefined || options.maxCols !== undefined);
+      const anydocFormat =
+        limitedExcel || sourceType === 'web' || /^https?:\/\//i.test(options.source)
+          ? undefined
+          : await this.anyDocFormat(options.source);
+      if (anydocFormat) {
+        try {
+          return await this.convertOfficeToMarkdown(options, outputPath, start, anydocFormat, sourceType);
+        } catch (error) {
+          if (!this.isAnydocConversionError(error)) {
+            throw error;
+          }
+          // 文档级转换失败（encrypted/unsupported/malformed 等）→ 尝试 Python 分支
+        }
       }
 
-      const result = await this.runner.run(script, args, { timeoutMs: options.timeout ?? 120000 });
-      if (result.exitCode !== 0) {
-        throw new Error(`source_to_md failed:\n${result.stdout}\n${result.stderr}`);
-      }
-
-      const assetsDir = await this.locateAssetsDir(outputPath);
-      const assetCount = assetsDir
-        ? (await fs.readdir(assetsDir).catch(() => [])).filter((e) => !e.endsWith('manifest.json')).length
-        : undefined;
-
-      return {
-        success: true,
-        markdownPath: outputPath,
-        assetsDir,
-        details: { processingTime: Date.now() - start, sourceType, assetCount },
-      };
+      return await this.convertViaPython(options, sourceType, outputPath, start);
     } catch (error) {
       return {
         success: false,
@@ -363,15 +369,186 @@ export class PptMasterService {
     }
   }
 
+  /** anydoc 能直接转换该扩展名（PDF 除外，PDF 走自有引擎）。返回 undefined 时回退 Python。 */
+  private async anyDocFormat(source: string): Promise<Format | undefined> {
+    const api = await loadAnydoc();
+    if (!api) return undefined;
+    try {
+      const fmt = api.formatFromExtension(path.extname(source).toLowerCase());
+      return fmt === null || fmt === 'pdf' ? undefined : fmt;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isAnydocConversionError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    switch ((error as { code?: string }).code) {
+      case 'unsupported':
+      case 'malformed':
+      case 'encrypted':
+      case 'resourceLimit':
+      case 'missingPart':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** 用 anydoc 把 Office 文档转换为 Markdown，并把内嵌资产（图片/嵌入对象）落盘到 <md>_files/。 */
+  private async convertOfficeToMarkdown(
+    options: ConvertToMarkdownOptions,
+    outputPath: string,
+    start: number,
+    format: Format,
+    sourceType: MarkdownSourceType,
+  ): Promise<ConvertToMarkdownResult> {
+    const api = await loadAnydoc();
+    if (!api) {
+      // 顶层 anyDocFormat 已确认可用，此处仅作类型守卫
+      throw new Error('Anydoc unexpectedly unavailable');
+    }
+
+    const sourcePath = path.resolve(options.source);
+    const bytes = await fs.readFile(sourcePath);
+
+    // anydoc 0.1.9 没有 from-document API，必须独立解析两次。
+    // 两次都是 CPU 密集（parse + render），并发可掩盖第二阶段的延迟。
+    const [document, markdown] = await Promise.all([
+      api.toDocument(bytes, format),
+      api.toMarkdownBytes(bytes, format),
+    ]);
+
+    // 先写 Markdown，成功后再落盘 assets，避免 md 写失败时留下孤立 _files/ 目录
+    await fs.writeFile(outputPath, markdown, 'utf-8');
+
+    let assetsDir: string | undefined;
+    let assetCount: number | undefined;
+    if (document.assets.length > 0) {
+      const dir = this.deriveAssetDir(outputPath);
+      assetsDir = dir;
+      await fs.mkdir(dir, { recursive: true });
+      const stem = path.basename(outputPath, path.extname(outputPath));
+      await Promise.all(
+        document.assets.map((asset) =>
+          fs.writeFile(
+            path.join(dir, `${stem}-${asset.id}.${this.assetExtension(asset.mediaType)}`),
+            asset.data,
+          )
+        )
+      );
+      assetCount = document.assets.length;
+    }
+
+    return {
+      success: true,
+      markdownPath: outputPath,
+      assetsDir,
+      details: {
+        processingTime: Date.now() - start,
+        sourceType,
+        assetCount,
+      },
+    };
+  }
+
+  private assetExtension(mediaType: string): string {
+    const [kind, subtype] = mediaType.split('/');
+    // 防御非标准 mediaType（如无 '/' 的裸类型名）
+    if (kind === 'image' && subtype) {
+      const ext = subtype.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      return ext || 'bin';
+    }
+    return 'bin';
+  }
+
+  /** Python 脚本回退：web 页（anydoc 不支持）与 anydoc 无法处理的文档格式。 */
+  private async convertViaPython(
+    options: ConvertToMarkdownOptions,
+    sourceType: MarkdownSourceType,
+    outputPath: string,
+    start: number,
+  ): Promise<ConvertToMarkdownResult> {
+    await this.runner.checkPython();
+    const missing = await this.runner.checkPackages(MARKDOWN_DEPS);
+    if (missing.length > 0) {
+      throw new Error(this.runner.formatMissingPackages(missing));
+    }
+
+    let script: string;
+    let args: string[];
+    switch (sourceType) {
+      case 'doc':
+        script = 'source_to_md/doc_to_md.py';
+        args = [path.resolve(options.source), '-o', outputPath];
+        break;
+      case 'excel':
+        // Python excel_to_md.py 仅支持 .xlsx/.xlsm。其他扩展名（.xls/.xlsb/.ods/.csv）
+        // 是 anydoc 独享格式，maxRows 截断本身不适用；用户想要截断请先另存为 .xlsx。
+        if (/\.(xlsb|ods|csv)$/i.test(options.source)) {
+          throw new Error(
+            `maxRows/maxCols is not supported for ${path.extname(options.source).toLowerCase()} (anydoc-only). ` +
+              'Resave as .xlsx first, or omit maxRows/maxCols to use the anydoc engine.'
+          );
+        }
+        script = 'source_to_md/excel_to_md.py';
+        args = [path.resolve(options.source), '-o', outputPath];
+        if (options.maxRows !== undefined) args.push('--max-rows', String(options.maxRows));
+        if (options.maxCols !== undefined) args.push('--max-cols', String(options.maxCols));
+        break;
+      case 'ppt':
+        // .potx/.potm 是 PowerPoint Template 格式，anydoc 不识别（from_extension=null），
+        // python-pptx 表面 SUPPORTED_FORMATS 包含但实际应作为模板由调用方先导出 .pptx。
+        if (/\.(potx|potm)$/i.test(options.source)) {
+          throw new Error(
+            'PowerPoint template formats (.potx/.potm) are not supported by either conversion engine. Export to .pptx first.'
+          );
+        }
+        // .ppt/.pps/.pot/.odp 是 anydoc 独享格式，python-pptx 真正不支持。
+        if (/\.(ppt|pps|pot|odp)$/i.test(options.source)) {
+          throw new Error(
+            `PowerPoint fallback (python-pptx) does not support ${path.extname(options.source).toLowerCase()}. ` +
+              'The anydoc engine should have handled this; if you reached this branch, the source file is unsupported.'
+          );
+        }
+        script = 'source_to_md/ppt_to_md.py';
+        args = [path.resolve(options.source), '-o', outputPath];
+        break;
+      case 'web':
+        script = 'source_to_md/web_to_md.py';
+        args = [options.source, '-o', outputPath];
+        break;
+      default:
+        throw new Error(`Unsupported source type: ${sourceType}`);
+    }
+
+    const result = await this.runner.run(script, args, { timeoutMs: options.timeout ?? 120000 });
+    if (result.exitCode !== 0) {
+      throw new Error(`source_to_md failed:\n${result.stdout}\n${result.stderr}`);
+    }
+
+    const assetsDir = await this.locateAssetsDir(outputPath);
+    const assetCount = assetsDir
+      ? (await fs.readdir(assetsDir).catch(() => [])).filter((e) => !e.endsWith('manifest.json')).length
+      : undefined;
+
+    return {
+      success: true,
+      markdownPath: outputPath,
+      assetsDir,
+      details: { processingTime: Date.now() - start, sourceType, assetCount },
+    };
+  }
+
   private detectSourceType(source: string): MarkdownSourceType {
     if (/^https?:\/\//i.test(source)) return 'web';
     const ext = path.extname(source).toLowerCase();
     if (ext === '.pdf') return 'pdf';
-    if (['.docx', '.doc', '.odt', '.rtf', '.epub', '.html', '.htm', '.ipynb', '.tex', '.latex', '.rst', '.org', '.typ'].includes(ext)) {
+    if (['.docx', '.doc', '.docm', '.odt', '.rtf', '.epub', '.html', '.htm', '.ipynb', '.tex', '.latex', '.rst', '.org', '.typ'].includes(ext)) {
       return 'doc';
     }
-    if (['.xlsx', '.xlsm'].includes(ext)) return 'excel';
-    if (['.pptx', '.pptm', '.ppsx', '.ppsm', '.potx', '.potm'].includes(ext)) return 'ppt';
+    if (['.xlsx', '.xlsm', '.xls', '.xlsb', '.ods', '.csv'].includes(ext)) return 'excel';
+    if (['.pptx', '.pptm', '.ppsx', '.ppsm', '.ppt', '.pps', '.pot', '.odp'].includes(ext)) return 'ppt';
     throw new Error(`Cannot detect source type for ${source}. Provide sourceType explicitly.`);
   }
 

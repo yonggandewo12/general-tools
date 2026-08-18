@@ -34,7 +34,7 @@
 # Node.js 18+（必需）
 node --version
 
-# Python 3.10+（PPT 导出和文档转换功能需要）
+# Python 3.10+（PPT 导出、Excel 操作、图片生成需要）
 python3.12 --version    # 推荐。macOS: brew install python@3.12
 # 如果用系统 python3 且版本 >= 3.10 也可以
 python3 --version
@@ -45,6 +45,8 @@ python3 --version
 > brew install python@3.12
 > ```
 > 项目会自动按 `python3.12` → `python3.11` → `python3.10` → `python3` 的顺序查找可用的 Python 3.10+，也可通过环境变量 `PPT_MASTER_PYTHON` 手动指定。
+
+> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定），**不再需要 Python 或 pandoc**。Python 仅用于 PPT 生成、Excel 编辑（`excel_*` 工具）、图片生成、网页/HTML/IPYNB 等格式的文档转换。安装时 `@firecrawl/anydoc` 的预编译二进制以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install @firecrawl/anydoc --allow-remote=all` 安装。
 
 ### 第二步：安装项目依赖
 
@@ -58,7 +60,7 @@ npm install
 # 编译 TypeScript → JavaScript
 npm run build
 
-# 安装 Python 依赖（PPT/图片生成/文档转换功能需要）
+# 安装 Python 依赖（PPT 生成/图片生成/Excel 编辑与网页转换需要）
 # macOS（PEP 668 保护）需要 --break-system-packages 参数
 python3.12 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
 python3.12 -m pip install --break-system-packages -r scripts/excel/requirements.txt
@@ -378,7 +380,7 @@ claude mcp add --transport stdio \
 
 ### 工具 8：`convert_to_markdown`
 
-将 PDF、DOCX、Excel、PowerPoint、网页 URL 等转换为 Markdown 格式。自动根据文件扩展名或 URL 检测源类型。
+将 PDF、Word（docx/doc/odt/rtf/epub）、Excel（xlsx/xls/xlsb/ods/csv）、PowerPoint（pptx/ppt/odp）、网页 URL 等转换为 Markdown 格式。自动根据文件扩展名或 URL 检测源类型。
 
 ```
 Claude，把 report.pdf 转成 Markdown
@@ -392,11 +394,17 @@ Claude，把 https://example.com 转为 Markdown
 | `source` | string (必填) | 源文件路径或 URL | - |
 | `sourceType` | enum | 源类型 (auto/pdf/doc/excel/ppt/web) | auto |
 | `outputPath` | string | 输出 Markdown 路径 | 输入文件名.md |
-| `maxRows` | number | Excel 每表最大行数 | 无限制 |
-| `maxCols` | number | Excel 每表最大列数 | 无限制 |
+| `maxRows` | number | Excel 每表最大行数（指定时该转换走 Python 子进程截断） | 无限制 |
+| `maxCols` | number | Excel 每表最大列数（指定时该转换走 Python 子进程截断） | 无限制 |
 | `pdfImages` | enum | PDF 图片提取 (all/filtered/none) | filtered |
 | `renderVectorFigures` | boolean | 渲染 PDF 矢量图为 PNG | false |
 | `vectorFigureDpi` | number | 矢量图渲染 DPI | 150 |
+
+> **内核与格式说明：**
+> - Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV 默认走 **anydoc** 内核（Rust 编译、Node 绑定，毫秒级转换），内嵌图片以 alt 文本保留、原始文件落到 `<输出名>_files/` 目录。
+> - PDF 走内置纯 JS 布局引擎；网页 URL 走 Python 抓取。
+> - `.potx/.potm`（PowerPoint 模板）不受支持，请先另存为 `.pptx`。
+> - 指定 `maxRows`/`maxCols` 会回退 Python `excel_to_md.py`（保留行/列截断语义）。
 
 ### 工具 9–33：Excel 操作（`excel_*`）
 

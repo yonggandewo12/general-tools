@@ -35,6 +35,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@firecrawl/anydoc": "^0.1.9",
     "@llamaindex/liteparse": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "markdown-it": "^14.2.0",

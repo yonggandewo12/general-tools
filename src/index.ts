@@ -537,7 +537,7 @@ const GENERATE_IMAGE_TOOL: Tool = {
 
 const CONVERT_TO_MARKDOWN_TOOL: Tool = {
   name: 'convert_to_markdown',
-  description: 'Convert PDF, DOCX, Excel, PowerPoint, or web pages to Markdown. Auto-detects source type from file extension or URL.',
+  description: 'Convert PDF, Word (docx/doc/odt/rtf/epub), Excel (xlsx/xls/xlsb/ods/csv), PowerPoint (pptx/ppt/odp), or web pages to Markdown. Auto-detects source type from file extension or URL.',
   inputSchema: {
     type: 'object',
     properties: {
