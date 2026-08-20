@@ -39,7 +39,7 @@ jobs:
         # @firecrawl/anydoc + @firecrawl/pdf-inspector prebuilt binaries are
         # distributed via remote URLs; npm blocks them by default on this
         # runner. --allow-remote=all whitelists them for one install.
-        run: npm ci --allow-remote=all
+        run: npm install --allow-remote=all --no-audit --no-fund
 
       - name: Install Python dependencies
         # Backward-compat path: verify that system Python + manual
@@ -90,7 +90,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Node dependencies
-        run: npm ci --allow-remote=all
+        run: npm install --allow-remote=all --no-audit --no-fund
 
       - name: Resolve embedded python binary
         id: resolve

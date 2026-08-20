@@ -16,3 +16,4 @@ __pycache__/
 /excel-mcp-server/
 scripts/excel/.venv/
 /.codeartsdoer/
+package-lock.json

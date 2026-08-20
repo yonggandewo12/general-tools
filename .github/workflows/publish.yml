@@ -77,7 +77,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Node dependencies
-        run: npm ci --allow-remote=all
+        run: npm install --allow-remote=all --no-audit --no-fund
 
       - name: Install Python dependencies
         run: |
@@ -125,7 +125,7 @@ jobs:
       - name: Install Node dependencies
         # The build script copies the JS deps out of node_modules into
         # npm-dist/<platform>/scripts/ for Python's PYTHONPATH.
-        run: npm ci --allow-remote=all
+        run: npm install --allow-remote=all --no-audit --no-fund
 
       - name: Build platform runtime
         # ~2-3 min: download PBS tarball + extract + pip install 13 packages
@@ -207,7 +207,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install Node dependencies
-        run: npm ci --allow-remote=all
+        run: npm install --allow-remote=all --no-audit --no-fund
 
       - name: Build
         run: npm run build

@@ -10,18 +10,16 @@
  *   node scripts/bump-version.js minor     # bump minor component
  *   node scripts/bump-version.js major     # bump major component
  *
- * The script edits package.json in place AND refreshes package-lock.json
- * to keep them in sync. npm ci in the publish workflow requires exact
- * lockfile sync; without this, the workflow fails with EUSAGE.
+ * The script edits package.json in place. We don't use package-lock.json
+ * (it's gitignored) so npm install in the publish workflow always
+ * rebuilds the dependency tree from scratch.
  */
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_PATH = resolve(__dirname, '..', 'package.json');
-const LOCK_PATH = resolve(__dirname, '..', 'package-lock.json');
 
 const RUNTIME_PKG_PREFIX = 'general-tools-mcp-server-runtime-';
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:[-+][\w.-]+)?$/;
@@ -98,30 +96,10 @@ function main() {
   for (const name of runtimeDeps) {
     console.log(`  ${name}: ${oldVersion} -> ${newVersion}`);
   }
-
-  // Refresh package-lock.json so npm ci in the publish workflow doesn't
-  // reject the lockfile as out-of-sync. We use --package-lock-only to
-  // avoid reinstalling the world just for a version bump.
-  if (existsSync(LOCK_PATH)) {
-    console.log('');
-    console.log('Refreshing package-lock.json...');
-    try {
-      execFileSync('npm', ['install', '--package-lock-only', '--allow-remote=all'], {
-        cwd: resolve(__dirname, '..'),
-        stdio: 'inherit',
-      });
-    } catch (err) {
-      console.error('Failed to refresh lock file:');
-      console.error(err.message);
-      console.error('Run `npm install --package-lock-only --allow-remote=all` manually.');
-      process.exit(1);
-    }
-  }
-
   console.log('');
   console.log('Next steps:');
-  console.log('  git diff package.json package-lock.json  # review the change');
-  console.log('  git add package.json package-lock.json && git commit -m "chore: bump v' + newVersion + '"');
+  console.log('  git diff package.json  # review the change');
+  console.log('  git add package.json && git commit -m "chore: bump v' + newVersion + '"');
   console.log('  git push  # triggers CI publish workflow');
 }
 
