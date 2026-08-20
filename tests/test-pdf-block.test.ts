@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildBlocks } from './src/pdf-engine/layout/block-builder.js';
+import { buildBlocks } from '../src/pdf-engine/layout/block-builder.js';
 import { makeLine } from './test-pdf-fixtures.js';
 
 describe('block-builder', () => {

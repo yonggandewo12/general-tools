@@ -1,4 +1,4 @@
-import { ExcelService } from './src/excel-service.js';
+import { ExcelService } from '../src/excel-service.js';
 import * as path from 'path';
 import * as os from 'os';
 import { promises as fs } from 'fs';

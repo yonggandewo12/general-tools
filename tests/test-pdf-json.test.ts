@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderJson } from './src/pdf-engine/json-renderer.js';
+import { renderJson } from '../src/pdf-engine/json-renderer.js';
 import { makeBlock, makeDoc } from './test-pdf-fixtures.js';
 
 describe('json-renderer', () => {

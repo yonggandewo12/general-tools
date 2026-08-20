@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDocument } from './src/pdf-engine/pdf-engine.js';
+import { parseDocument } from '../src/pdf-engine/pdf-engine.js';
 import { makeTextPdf } from './test-pdf-fixtures.js';
 
 describe('pdf-engine facade', () => {

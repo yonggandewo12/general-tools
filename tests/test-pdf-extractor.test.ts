@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PdfExtractor } from './src/pdf-extractor.js';
+import { PdfExtractor } from '../src/pdf-extractor.js';
 import { makeTextPdf, writeFixture } from './test-pdf-fixtures.js';
 
 describe('PdfExtractor.extract (new engine)', () => {

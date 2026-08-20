@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encodePng, ImageKind } from './src/pdf-engine/png-encoder.js';
+import { encodePng, ImageKind } from '../src/pdf-engine/png-encoder.js';
 
 describe('png-encoder', () => {
   it('encodes RGBA32 data', async () => {

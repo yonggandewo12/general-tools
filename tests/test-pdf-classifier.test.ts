@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyBlocks } from './src/pdf-engine/layout/classifier.js';
+import { classifyBlocks } from '../src/pdf-engine/layout/classifier.js';
 import { makeBlock } from './test-pdf-fixtures.js';
 
 describe('classifier', () => {

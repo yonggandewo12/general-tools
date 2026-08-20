@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown } from './src/pdf-engine/markdown-renderer.js';
+import { renderMarkdown } from '../src/pdf-engine/markdown-renderer.js';
 import { makeBlock, makeDoc, makeImageBlock } from './test-pdf-fixtures.js';
-import { PdfDocument, TextBlock } from './src/pdf-engine/types.js';
+import { PdfDocument, TextBlock } from '../src/pdf-engine/types.js';
 
 describe('markdown-renderer', () => {
   it('renders headings with # prefix', () => {

@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 // vi.hoisted ensures the mock state is available when vi.mock's factory runs
 const mockState = vi.hoisted(() => ({ failOnCall: 0, calls: 0 }));
 
-vi.mock('./src/pdf-engine/png-encoder.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./src/pdf-engine/png-encoder.js')>();
+vi.mock('../src/pdf-engine/png-encoder.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/pdf-engine/png-encoder.js')>();
   return {
     ...actual,
     encodePng: vi.fn(async (...args: Parameters<typeof actual.encodePng>) => {
@@ -15,7 +15,7 @@ vi.mock('./src/pdf-engine/png-encoder.js', async (importOriginal) => {
   };
 });
 
-const { parseDocument } = await import('./src/pdf-engine/pdf-engine.js');
+const { parseDocument } = await import('../src/pdf-engine/pdf-engine.js');
 
 describe('pdf-engine image encode failure', () => {
   it('keeps markdown refs and result.images in sync when an image fails', async () => {

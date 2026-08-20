@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { detectAndBuildTable } from './src/pdf-engine/layout/table-structure.js';
-import { TextLine, TextBlock, PdfRawItem } from './src/pdf-engine/types.js';
+import { detectAndBuildTable } from '../src/pdf-engine/layout/table-structure.js';
+import { TextLine, TextBlock, PdfRawItem } from '../src/pdf-engine/types.js';
 import { makeBlock } from './test-pdf-fixtures.js';
 
 // 构造带 items（词级坐标）的文本行：按空格分词，词 i 落在 cols[i] 列

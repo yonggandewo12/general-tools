@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PdfRawItem, TextLine, TextBlock, PdfDocument, PdfRawImage } from './src/pdf-engine/types.js';
+import { PdfRawItem, TextLine, TextBlock, PdfDocument, PdfRawImage } from '../src/pdf-engine/types.js';
 
 // 生成单页 PDF：指定位置文本行（yTop 是从顶部算的距离，pdf-lib 用底部基线）
 export async function makeTextPdf(

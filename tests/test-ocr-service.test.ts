@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OcrService } from './src/ocr-service.js';
+import { OcrService } from '../src/ocr-service.js';
 
 describe('OcrService', () => {
   let ocrService: OcrService;

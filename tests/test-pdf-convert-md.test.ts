@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PptMasterService } from './src/ppt-master-service.js';
+import { PptMasterService } from '../src/ppt-master-service.js';
 import { makeTextPdf, writeFixture } from './test-pdf-fixtures.js';
 
 describe('convertToMarkdown (PDF branch, new engine)', () => {

@@ -1,5 +1,5 @@
-import { PdfConverter } from './src/pdf-converter.js';
-import { MdConverter } from './src/md-converter.js';
+import { PdfConverter } from '../src/pdf-converter.js';
+import { MdConverter } from '../src/md-converter.js';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 

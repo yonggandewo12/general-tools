@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortByReadingOrder } from './src/pdf-engine/layout/reading-order.js';
+import { sortByReadingOrder } from '../src/pdf-engine/layout/reading-order.js';
 import { makeBlock } from './test-pdf-fixtures.js';
 
 describe('reading-order', () => {
