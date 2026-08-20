@@ -14,6 +14,7 @@ import { MdConverter } from './md-converter.js';
 import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExtractOptions, PdfScreenshotOptions, GeneratePresentationOptions, GenerateImageOptions, ConvertToMarkdownOptions } from './types.js';
 import { OcrService } from './ocr-service.js';
 import { PdfExtractor } from './pdf-extractor.js';
+import { extractPdf } from './pdf-extract-adapter.js';
 import { PptMasterService } from './ppt-master-service.js';
 import { ExcelService } from './excel-service.js';
 import { EXCEL_TOOLS, EXCEL_ACTION_MAP } from './excel-tools.js';
@@ -944,7 +945,7 @@ class Md2PdfServer {
       if (name === 'extract_pdf_text') {
         try {
           const options = args as unknown as PdfExtractOptions;
-          const result = await pdfExtractor.extract(options);
+          const result = await extractPdf(options);
 
           if (result.success) {
             return {

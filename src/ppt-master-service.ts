@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { Format } from '@firecrawl/anydoc';
 import { PythonScriptRunner } from './python-runner.js';
-import { parseDocument } from './pdf-engine/index.js';
+import { extractMarkdown } from './pdf-inspector-service.js';
 import {
   GeneratePresentationOptions,
   GeneratePresentationResult,
@@ -584,38 +584,30 @@ export class PptMasterService {
   ): Promise<ConvertToMarkdownResult> {
     const pdfPath = path.resolve(options.source);
     const imageOutput = options.pdfImages ?? 'filtered';
-    const assetBase = this.deriveAssetDir(outputPath);
-    const assetsDir = imageOutput === 'none' ? undefined : assetBase;
 
-    const result = await parseDocument(pdfPath, {
-      outputFormat: 'markdown',
-      markdown: {
-        imageOutput: imageOutput === 'none' ? 'off' : 'external',
-        // Markdown 引用用相对路径（与 md 文件同目录的 _files 目录）
-        imageBasePath: assetsDir ? path.basename(assetsDir) : undefined,
-      },
-    });
-
-    if (!result.success) {
-      throw new Error(result.error ?? 'PDF to Markdown failed');
-    }
-
-    let assetCount: number | undefined;
-    if (assetsDir && result.images && result.images.length > 0) {
-      await fs.mkdir(assetsDir, { recursive: true });
-      await Promise.all(
-        result.images.map((img) => fs.writeFile(path.join(assetsDir, img.filename), img.data))
+    if (imageOutput !== 'none') {
+      console.warn(
+        '[convert_to_markdown] pdfImages=' + imageOutput + ' is a no-op for PDF: ' +
+        '@firecrawl/pdf-inspector does not return raw image bytes. Use screenshot_pdf for page images.',
       );
-      assetCount = result.images.length;
     }
 
-    await fs.writeFile(outputPath, result.markdown ?? '', 'utf-8');
+    const { markdown, pagesNeedingOcr } = await extractMarkdown(pdfPath);
+
+    if (pagesNeedingOcr.length > 0) {
+      console.warn(
+        `[convert_to_markdown] PDF has ${pagesNeedingOcr.length} page(s) flagged for OCR: ` +
+          pagesNeedingOcr.map((p) => p + 1).join(', ') +
+          '. Native text may be incomplete.',
+      );
+    }
+
+    await fs.writeFile(outputPath, markdown, 'utf-8');
 
     return {
       success: true,
       markdownPath: outputPath,
-      assetsDir,
-      details: { processingTime: Date.now() - start, sourceType: 'pdf', assetCount },
+      details: { processingTime: Date.now() - start, sourceType: 'pdf' },
     };
   }
 }

@@ -46,7 +46,9 @@ python3 --version
 > ```
 > 项目会自动按 `python3.12` → `python3.11` → `python3.10` → `python3` 的顺序查找可用的 Python 3.10+，也可通过环境变量 `PPT_MASTER_PYTHON` 手动指定。
 
-> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定），**不再需要 Python 或 pandoc**。Python 仅用于 PPT 生成、Excel 编辑（`excel_*` 工具）、图片生成、网页/HTML/IPYNB 等格式的文档转换。安装时 `@firecrawl/anydoc` 的预编译二进制以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install @firecrawl/anydoc --allow-remote=all` 安装。
+> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定），**不再需要 Python 或 pandoc**；PDF 转换走 `@firecrawl/pdf-inspector`（Rust + NAPI），性能毫秒级、支持多列阅读顺序与表格识别。Python 仅用于 PPT 生成、Excel 编辑（`excel_*` 工具）、图片生成、网页/HTML/IPYNB 等格式的文档转换。`@firecrawl/anydoc` 与 `@firecrawl/pdf-inspector` 的预编译二进制都以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install --allow-remote=all` 一次性装齐。
+>
+> **macOS 平台限制**：`@firecrawl/pdf-inspector` 的 prebuilt 二进制仅打包 ARM64（Apple Silicon）。Intel Mac 上需自行 `cargo build` 或换用其他 PDF 库。`@firecrawl/anydoc` 同时支持 x86_64 与 ARM64。
 
 ### 第二步：安装项目依赖
 
@@ -122,6 +124,7 @@ claude mcp add general-tools \
 |------|---------|---------------|---------|
 | **OCR 文字识别** | `recognize_text` | `BAIDU_OCR_API_KEY` + `BAIDU_OCR_SECRET_KEY` | [百度智能云](https://console.bce.baidu.com/ai/#/ai/ocr/overview/index) 创建应用 |
 | **AI 图片生成** | `generate_image` | `IMAGE_BACKEND` + 对应后端 API Key（见下方） | 选择一家服务商 |
+| **PDF OCR 路由** | `extract_pdf_text` / `convert_to_markdown` (PDF) | `PDFIUM_LIB_PATH` + `ORT_DYLIB_PATH`（仅扫描型 PDF 需 OCR 时） | 默认走纯文本提取，扫描型 PDF 文本不可靠时才启用 |
 | **Python 路径** | 后 3 个工具 | `PPT_MASTER_PYTHON`（可选，不设则自动检测） | — |
 
 **AI 图片生成后端选择（`IMAGE_BACKEND` + 对应 Key）：**
@@ -402,7 +405,8 @@ Claude，把 https://example.com 转为 Markdown
 
 > **内核与格式说明：**
 > - Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV 默认走 **anydoc** 内核（Rust 编译、Node 绑定，毫秒级转换），内嵌图片以 alt 文本保留、原始文件落到 `<输出名>_files/` 目录。
-> - PDF 走内置纯 JS 布局引擎；网页 URL 走 Python 抓取。
+> - PDF 走 `@firecrawl/pdf-inspector`（Rust + NAPI，多列阅读顺序、表格识别、毫秒级）；**不返回图片字节流**（`pdfImages` 选项对 PDF 是 no-op），需要原图请用 `screenshot_pdf` 出页面截图。
+> - 网页 URL 走 Python 抓取。
 > - `.potx/.potm`（PowerPoint 模板）不受支持，请先另存为 `.pptx`。
 > - 指定 `maxRows`/`maxCols` 会回退 Python `excel_to_md.py`（保留行/列截断语义）。
 

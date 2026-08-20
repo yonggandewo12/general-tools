@@ -10,6 +10,7 @@ dist/
 /SenseNova-Skills/
 .tmp-fixtures/
 /opendataloader-pdf/
+/pdf-inspector/
 __pycache__/
 *.pyc
 /excel-mcp-server/
