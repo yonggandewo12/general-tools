@@ -26,7 +26,44 @@
 
 ---
 
-## 从 0 到 1 完整安装
+## 从 npm 远程安装（推荐）
+
+发布到 npm 后，**用户侧只需两个命令**：
+
+```bash
+# 1. 全局安装（主包 + 自动拉匹配平台的 Python 嵌入子包）
+npm install -g general-tools-mcp-server
+
+# 2. 注册 MCP（路径解析到全局 node_modules）
+claude mcp add general-tools -- node "$(npm root -g)/general-tools-mcp-server/dist/index.js"
+
+# 3. 验证
+claude mcp list | grep general-tools
+```
+
+**首次运行需要解锁嵌入 Python**（每个用户机器上各跑一次，build 端清除不传播）：
+
+```bash
+# macOS Apple Silicon — Gatekeeper quarantine
+PY="$(node -e "console.log(require.resolve('general-tools-mcp-server-runtime-darwin-arm64/package.json').replace('/package.json','/python/bin/python3.12'))")"
+xattr -dr com.apple.quarantine "$PY"
+"$PY" --version   # → Python 3.12.14
+
+# macOS Intel — 上一步换 runtime-darwin-arm64 为 runtime-linux-x64-gnu 是错的；
+# 当前 darwin-x64 (Intel Mac) 暂未发布，Intel Mac 用户需 PPT_MASTER_PYTHON 回退系统 Python
+
+# Windows — SmartScreen Unblock
+# PowerShell: Unblock-File "$env:USERPROFILE\node_modules\general-tools-mcp-server-runtime-win32-x64-msvc\python\python.exe"
+
+# Linux — 验证 glibc ≥ 2.31
+ldd --version | head -1
+```
+
+> **包名锁定 `general-tools-mcp-server`**：npm 上另一个 `general-tools@0.0.5` 是别人的包，与本项目无关。
+
+---
+
+## 从 0 到 1 完整安装（本地开发）
 
 ### 第一步：检查前置依赖
 
