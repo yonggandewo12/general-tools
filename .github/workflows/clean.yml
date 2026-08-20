@@ -15,100 +15,87 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  delete-old-runs:
-    name: Delete failed/cancelled runs (>7 days)
+  delete-artifacts:
+    # Aggressive: delete ALL artifacts every run. npm-dist artifacts are
+    # only useful while their owning publish run is in progress; after
+    # the run completes, downstream jobs have already consumed them.
+    # Retaining past artifacts only wastes storage quota.
+    name: Delete ALL artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          deleted=0
+          page=1
+          while :; do
+            ids=$(gh api "repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+              --jq '.artifacts[].id' 2>/dev/null || true)
+            [ -z "$ids" ] && break
+
+            for id in $ids; do
+              if gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" >/dev/null 2>&1; then
+                deleted=$((deleted + 1))
+              fi
+            done
+
+            page=$((page + 1))
+            # Safety: cap at 100 pages (10k artifacts) per run.
+            [ $page -gt 100 ] && break
+          done
+
+          echo "Total artifacts deleted: ${deleted}"
+
+  delete-runs:
+    # Aggressive: delete ALL workflow runs older than 24h. Recent runs
+    # remain accessible via the GitHub UI while they're being inspected;
+    # after that, this job cleans them up so the Actions tab doesn't
+    # accumulate history.
+    name: Delete runs (>24h, all conclusions)
     runs-on: ubuntu-latest
     steps:
       - name: Delete stale workflow runs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          RETAIN_DAYS: 7
+          RETAIN_HOURS: 24
         run: |
           set -euo pipefail
-          cutoff=$(date -u -d "-${RETAIN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+          cutoff=$(date -u -d "-${RETAIN_HOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
 
           echo "Cutoff: $cutoff"
-          echo "Listing runs older than $RETAIN_DAYS days..."
 
-          # Iterate pages of workflow runs and delete failures / cancellations.
           deleted=0
           page=1
           while :; do
             response=$(gh api "repos/${REPO}/actions/runs?per_page=100&page=${page}" \
-              --jq '.workflow_runs[] | "\(.id) \(.created_at) \(.conclusion) \(.name)"' || break)
+              --jq '.workflow_runs[] | "\(.id) \(.created_at) \(.conclusion) \(.name)"' 2>/dev/null || true)
             [ -z "$response" ] && break
 
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               id=$(echo "$line" | awk '{print $1}')
               created=$(echo "$line" | awk '{print $2}')
-              conclusion=$(echo "$line" | awk '{print $3}')
               name=$(echo "$line" | cut -d' ' -f4-)
 
-              # Skip runs newer than cutoff or still useful (success)
+              # Skip runs newer than cutoff (still in inspection window)
               if [ "$created" \> "$cutoff" ] 2>/dev/null; then
-                continue
-              fi
-              if [ "$conclusion" != "failure" ] && [ "$conclusion" != "cancelled" ]; then
                 continue
               fi
 
               if gh api -X DELETE "repos/${REPO}/actions/runs/${id}" >/dev/null 2>&1; then
                 deleted=$((deleted + 1))
-                echo "deleted run ${id} (${name}, ${conclusion}, ${created})"
+                echo "deleted run ${id} (${name}, ${created})"
               else
                 echo "::warning::failed to delete run ${id}"
               fi
             done <<< "$response"
 
             page=$((page + 1))
-            # Safety: cap at 100 pages (10k runs) per run.
             [ $page -gt 100 ] && break
           done
 
           echo "Total runs deleted: ${deleted}"
-
-  delete-old-artifacts:
-    name: Delete artifacts (>30 days)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Delete stale artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          RETAIN_DAYS: 30
-        run: |
-          set -euo pipefail
-          cutoff=$(date -u -d "-${RETAIN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
-
-          echo "Cutoff: $cutoff"
-
-          deleted=0
-          page=1
-          while :; do
-            response=$(gh api "repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              --jq '.artifacts[] | "\(.id) \(.created_at) \(.name)"' || break)
-            [ -z "$response" ] && break
-
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              id=$(echo "$line" | awk '{print $1}')
-              created=$(echo "$line" | awk '{print $2}')
-              name=$(echo "$line" | cut -d' ' -f3-)
-
-              [ "$created" \> "$cutoff" ] 2>/dev/null && continue
-
-              if gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" >/dev/null 2>&1; then
-                deleted=$((deleted + 1))
-                echo "deleted artifact ${id} (${name}, ${created})"
-              else
-                echo "::warning::failed to delete artifact ${id}"
-              fi
-            done <<< "$response"
-
-            page=$((page + 1))
-            [ $page -gt 100 ] && break
-          done
-
-          echo "Total artifacts deleted: ${deleted}"
