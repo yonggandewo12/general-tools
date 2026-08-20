@@ -103,8 +103,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # darwin-x64 (Intel Mac, macos-13) is intentionally omitted:
+          # GitHub's macos-13 runner pool is currently exhausted /
+          # deprecated. Re-add when the runner is reliably available.
           - { platform: darwin-arm64,        os: macos-14 }
-          - { platform: darwin-x64,          os: macos-13 }
           - { platform: linux-x64-gnu,       os: ubuntu-22.04 }
           - { platform: linux-arm64-gnu,     os: ubuntu-22.04-arm }
           - { platform: win32-x64-msvc,      os: windows-2022 }
@@ -156,7 +158,6 @@ jobs:
       matrix:
         platform:
           - darwin-arm64
-          - darwin-x64
           - linux-x64-gnu
           - linux-arm64-gnu
           - win32-x64-msvc

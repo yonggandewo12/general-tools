@@ -53,7 +53,6 @@ const PYTHON_MINOR = '3.12';
 export function platformSuffix(): string | null {
   const { platform: p, arch } = process;
   if (p === 'darwin' && arch === 'arm64') return 'darwin-arm64';
-  if (p === 'darwin' && arch === 'x64') return 'darwin-x64';
   if (p === 'linux' && arch === 'x64') return 'linux-x64-gnu';
   if (p === 'linux' && arch === 'arm64') return 'linux-arm64-gnu';
   if (p === 'win32' && arch === 'x64') return 'win32-x64-msvc';
@@ -62,7 +61,6 @@ export function platformSuffix(): string | null {
 
 export const SUPPORTED_PLATFORM_SUFFIXES = [
   'darwin-arm64',
-  'darwin-x64',
   'linux-x64-gnu',
   'linux-arm64-gnu',
   'win32-x64-msvc',

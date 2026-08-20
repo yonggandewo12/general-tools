@@ -1,0 +1,114 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Daily at 03:00 UTC (11:00 Beijing). Low-traffic window to avoid
+    # concurrent quota usage with other CI.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cleanup-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  delete-old-runs:
+    name: Delete failed/cancelled runs (>7 days)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete stale workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RETAIN_DAYS: 7
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d "-${RETAIN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+
+          echo "Cutoff: $cutoff"
+          echo "Listing runs older than $RETAIN_DAYS days..."
+
+          # Iterate pages of workflow runs and delete failures / cancellations.
+          deleted=0
+          page=1
+          while :; do
+            response=$(gh api "repos/${REPO}/actions/runs?per_page=100&page=${page}" \
+              --jq '.workflow_runs[] | "\(.id) \(.created_at) \(.conclusion) \(.name)"' || break)
+            [ -z "$response" ] && break
+
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              id=$(echo "$line" | awk '{print $1}')
+              created=$(echo "$line" | awk '{print $2}')
+              conclusion=$(echo "$line" | awk '{print $3}')
+              name=$(echo "$line" | cut -d' ' -f4-)
+
+              # Skip runs newer than cutoff or still useful (success)
+              if [ "$created" \> "$cutoff" ] 2>/dev/null; then
+                continue
+              fi
+              if [ "$conclusion" != "failure" ] && [ "$conclusion" != "cancelled" ]; then
+                continue
+              fi
+
+              if gh api -X DELETE "repos/${REPO}/actions/runs/${id}" >/dev/null 2>&1; then
+                deleted=$((deleted + 1))
+                echo "deleted run ${id} (${name}, ${conclusion}, ${created})"
+              else
+                echo "::warning::failed to delete run ${id}"
+              fi
+            done <<< "$response"
+
+            page=$((page + 1))
+            # Safety: cap at 100 pages (10k runs) per run.
+            [ $page -gt 100 ] && break
+          done
+
+          echo "Total runs deleted: ${deleted}"
+
+  delete-old-artifacts:
+    name: Delete artifacts (>30 days)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete stale artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RETAIN_DAYS: 30
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d "-${RETAIN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+
+          echo "Cutoff: $cutoff"
+
+          deleted=0
+          page=1
+          while :; do
+            response=$(gh api "repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+              --jq '.artifacts[] | "\(.id) \(.created_at) \(.name)"' || break)
+            [ -z "$response" ] && break
+
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              id=$(echo "$line" | awk '{print $1}')
+              created=$(echo "$line" | awk '{print $2}')
+              name=$(echo "$line" | cut -d' ' -f3-)
+
+              [ "$created" \> "$cutoff" ] 2>/dev/null && continue
+
+              if gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}" >/dev/null 2>&1; then
+                deleted=$((deleted + 1))
+                echo "deleted artifact ${id} (${name}, ${created})"
+              else
+                echo "::warning::failed to delete artifact ${id}"
+              fi
+            done <<< "$response"
+
+            page=$((page + 1))
+            [ $page -gt 100 ] && break
+          done
+
+          echo "Total artifacts deleted: ${deleted}"
