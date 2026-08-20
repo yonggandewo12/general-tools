@@ -1,6 +1,6 @@
 {
   "name": "general-tools-mcp-server",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "MCP server for HTML/Markdown/PDF conversion, OCR, PPT generation, AI image generation, and document-to-Markdown conversion",
   "type": "module",
   "bin": {
@@ -9,15 +9,39 @@
   "files": [
     "dist",
     "scripts/ppt-master",
-    "scripts/excel"
+    "scripts/excel",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!**/*.pyo",
+    "!**/tests/**"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "optionalDependencies": {
+    "@general-tools/python-runtime-darwin-arm64": "1.2.0",
+    "@general-tools/python-runtime-darwin-x64": "1.2.0",
+    "@general-tools/python-runtime-linux-x64-gnu": "1.2.0",
+    "@general-tools/python-runtime-linux-arm64-gnu": "1.2.0",
+    "@general-tools/python-runtime-win32-x64-msvc": "1.2.0"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
     "test": "vitest run",
-    "setup:python": "pip install -r scripts/ppt-master/requirements.txt"
+    "build:platform": "python3 scripts/build-platform-package.py",
+    "bump": "node scripts/bump-version.js"
   },
   "keywords": [
     "mcp",

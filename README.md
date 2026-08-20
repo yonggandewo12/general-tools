@@ -33,22 +33,13 @@
 ```bash
 # Node.js 18+（必需）
 node --version
-
-# Python 3.10+（PPT 导出、Excel 操作、图片生成需要）
-python3.12 --version    # 推荐。macOS: brew install python@3.12
-# 如果用系统 python3 且版本 >= 3.10 也可以
-python3 --version
 ```
 
-> macOS 默认的 `python3` 通常为 3.9（不支持 3.10+ 语法），建议安装独立版本：
-> ```bash
-> brew install python@3.12
-> ```
-> 项目会自动按 `python3.12` → `python3.11` → `python3.10` → `python3` 的顺序查找可用的 Python 3.10+，也可通过环境变量 `PPT_MASTER_PYTHON` 手动指定。
+**Python 已嵌入 npm 包，无需在主机上预先安装**。`@general-tools/python-runtime-<platform>` 子包会随 `npm install` 自动按平台拉取（darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64-msvc），内含 CPython 3.12 + 全部 pip 依赖（pptx、openpyxl、Pillow 等）。
 
-> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定），**不再需要 Python 或 pandoc**；PDF 转换走 `@firecrawl/pdf-inspector`（Rust + NAPI），性能毫秒级、支持多列阅读顺序与表格识别。Python 仅用于 PPT 生成、Excel 编辑（`excel_*` 工具）、图片生成、网页/HTML/IPYNB 等格式的文档转换。`@firecrawl/anydoc` 与 `@firecrawl/pdf-inspector` 的预编译二进制都以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install --allow-remote=all` 一次性装齐。
->
-> **macOS 平台限制**：`@firecrawl/pdf-inspector` 的 prebuilt 二进制仅打包 ARM64（Apple Silicon）。Intel Mac 上需自行 `cargo build` 或换用其他 PDF 库。`@firecrawl/anydoc` 同时支持 x86_64 与 ARM64。
+如果想用主机上自带的 Python（向后兼容），设置 `PPT_MASTER_PYTHON` 即可跳过嵌入运行时。
+
+> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定）；PDF 转换走 `@firecrawl/pdf-inspector`（Rust + NAPI）；嵌入的 Python 仅用于 PPT 生成（`generate_presentation`）、25 个 `excel_*` 工具、`convert_to_markdown` 的 HTML/IPYNB/Web/Office-fallback 路径。`@firecrawl/anydoc` 与 `@firecrawl/pdf-inspector` 的预编译二进制都以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install --allow-remote=all` 一次性装齐。
 
 ### 第二步：安装项目依赖
 
@@ -56,19 +47,17 @@ python3 --version
 # 进入项目目录
 cd /Users/xuliang/Documents/project/general-tools
 
-# 安装 Node.js 依赖
-npm install
+# 安装 Node.js 依赖（会自动拉取嵌入 Python 子包）
+npm install --allow-remote=all
 
 # 编译 TypeScript → JavaScript
 npm run build
+```
 
-# 安装 Python 依赖（PPT 生成/图片生成/Excel 编辑与网页转换需要）
-# macOS（PEP 668 保护）需要 --break-system-packages 参数
+**Python 依赖** 已嵌入，无需手动 `pip install`。仅当使用自备 Python（`PPT_MASTER_PYTHON`）时需手动：
+```bash
 python3.12 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
 python3.12 -m pip install --break-system-packages -r scripts/excel/requirements.txt
-# 如果系统 python3 已是 3.10+：
-# python3 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
-# python3 -m pip install --break-system-packages -r scripts/excel/requirements.txt
 ```
 
 ### 第三步：配置 Claude Code MCP（可选）
@@ -103,6 +92,53 @@ claude mcp add general-tools \
 
 配置后重启 Claude Code，执行 `claude mcp list` 应看到 35 个工具（10 个通用 + 25 个 Excel）。
 
+### 平台支持与首次运行提示
+
+**支持的 5 个平台子包**（自动按 `process.platform` + `process.arch` 选择）：
+
+| 平台子包 | 适用主机 |
+|---|---|
+| `@general-tools/python-runtime-darwin-arm64` | macOS Apple Silicon（M1/M2/M3/M4） |
+| `@general-tools/python-runtime-darwin-x64` | macOS Intel（x86_64） |
+| `@general-tools/python-runtime-linux-x64-gnu` | Linux x86_64（glibc ≥ 2.31） |
+| `@general-tools/python-runtime-linux-arm64-gnu` | Linux ARM64（glibc ≥ 2.31） |
+| `@general-tools/python-runtime-win32-x64-msvc` | Windows 10/11 x64 |
+
+> 区别于 `@firecrawl/pdf-inspector`（仅 ARM64），本项目显式覆盖 **Intel Mac 与 Windows**。
+
+#### macOS Gatekeeper（首次运行需解锁）
+
+未签名的嵌入 Python 会被 macOS Gatekeeper 拦截（`xattr` quarantine）。**每个用户机器上需手动运行一次**（build 端的清除不会传播）：
+
+```bash
+SUFFIX=$(node -e "console.log(process.platform+'-'+process.arch)")
+PY="$(node -e "console.log(require.resolve('@general-tools/python-runtime-'+'$SUFFIX'+'/package.json').replace('/package.json','/python/bin/python3.12'))")"
+xattr -dr com.apple.quarantine "$PY"
+"$PY" --version   # → Python 3.12.14
+```
+
+#### Windows SmartScreen（首次运行需解锁）
+
+未签名的 `python.exe` 会被 SmartScreen 警告。**两种方式二选一**：
+
+```powershell
+# 方式 A — PowerShell 一键解锁
+Unblock-File "$env:USERPROFILE\node_modules\@general-tools\python-runtime-win32-x64-msvc\python\python.exe"
+
+# 方式 B — 文件资源管理器
+# 右键 python.exe → Properties → 勾选 "Unblock" → Apply
+```
+
+#### Linux glibc 要求
+
+嵌入 Python 要求系统 glibc ≥ 2.31（覆盖 Ubuntu 20.04+、Debian 11+、CentOS Stream 9+、Alpine 3.13+ musl-static variant）：
+
+```bash
+ldd --version | head -1   # → ldd (Ubuntu GLIBC 2.35-0ubuntu3) 2.35
+```
+
+若低于 2.31（如 CentOS 7、Debian 10），安装系统 Python 3.10+ 并设置 `PPT_MASTER_PYTHON` 环境变量。
+
 ### 第四步（可选）：配置扩展功能的环境变量
 
 某些功能需要第三方服务的 API Key。以下均为**可选**，不配置不影响其他工具。
@@ -114,7 +150,6 @@ claude mcp add general-tools \
   -e BAIDU_OCR_SECRET_KEY=你的百度OCRSecret \
   -e IMAGE_BACKEND=gemini \
   -e GEMINI_API_KEY=你的GeminiKey \
-  -e PPT_MASTER_PYTHON=python3.12 \
   -- node /Users/xuliang/Documents/project/general-tools/dist/index.js
 ```
 
@@ -125,7 +160,7 @@ claude mcp add general-tools \
 | **OCR 文字识别** | `recognize_text` | `BAIDU_OCR_API_KEY` + `BAIDU_OCR_SECRET_KEY` | [百度智能云](https://console.bce.baidu.com/ai/#/ai/ocr/overview/index) 创建应用 |
 | **AI 图片生成** | `generate_image` | `IMAGE_BACKEND` + 对应后端 API Key（见下方） | 选择一家服务商 |
 | **PDF OCR 路由** | `extract_pdf_text` / `convert_to_markdown` (PDF) | `PDFIUM_LIB_PATH` + `ORT_DYLIB_PATH`（仅扫描型 PDF 需 OCR 时） | 默认走纯文本提取，扫描型 PDF 文本不可靠时才启用 |
-| **Python 路径** | 后 3 个工具 | `PPT_MASTER_PYTHON`（可选，不设则自动检测） | — |
+| **Python 路径**（可选） | `generate_presentation` / `excel_*` / `convert_to_markdown`（HTML/IPYNB/Web/Office-fallback） | `PPT_MASTER_PYTHON`（默认用嵌入 Python；设置后改用主机 Python） | 仅当嵌入 Python 出问题时回退到系统 Python |
 
 **AI 图片生成后端选择（`IMAGE_BACKEND` + 对应 Key）：**
 
@@ -434,7 +469,7 @@ Claude，把 https://example.com 转为 Markdown
 | `excel_get_data_validation` | 查询数据验证规则 |
 | `excel_insert_rows` / `excel_insert_columns` / `excel_delete_rows` / `excel_delete_columns` | 行列增删 |
 
-> **依赖**：需安装 `pip install -r scripts/excel/requirements.txt`（openpyxl）。Python 路径自动探测，可用 `PPT_MASTER_PYTHON` 覆盖。
+> **依赖**：openpyxl 已嵌入运行时，无需手动安装。Python 路径默认用嵌入 Python；可用 `PPT_MASTER_PYTHON` 改用系统 Python。
 | `timeout` | number | 超时(ms) | 120000 |
 
 ---
