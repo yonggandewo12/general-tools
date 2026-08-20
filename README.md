@@ -69,7 +69,7 @@ python3.12 -m pip install --break-system-packages -r scripts/excel/requirements.
 # python3 -m pip install --break-system-packages -r scripts/excel/requirements.txt
 ```
 
-### 第三步：配置 Claude Code MCP
+### 第三步：配置 Claude Code MCP（可选）
 
 两种方式二选一：
 
