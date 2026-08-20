@@ -128,6 +128,10 @@ jobs:
       - name: Build platform runtime
         # ~2-3 min: download PBS tarball + extract + pip install 13 packages
         # into the embedded site-packages + smoke import.
+        # shell: bash is required for windows-latest runners because the
+        # default shell is PowerShell 7, which treats `--platform` as
+        # `--p` (decrement) and rejects the flag with a parse error.
+        shell: bash
         run: |
           python3 scripts/build-platform-package.py \
             --platform "${{ matrix.platform }}" \

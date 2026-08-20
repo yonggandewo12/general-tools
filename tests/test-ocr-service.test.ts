@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { OcrService } from '../src/ocr-service.js';
 
 describe('OcrService', () => {
@@ -355,7 +357,7 @@ describe('OcrService', () => {
       });
 
       // Create a temp PDF-like file for the test
-      const tmpPdfPath = '/tmp/test-ocr-sample.pdf';
+      const tmpPdfPath = join(tmpdir(), 'test-ocr-sample.pdf');
       const { writeFileSync, unlinkSync, existsSync } = await import('fs');
       writeFileSync(tmpPdfPath, Buffer.from('PDF test content'));
 
@@ -404,7 +406,7 @@ describe('OcrService', () => {
       });
 
       // Create a temp OFD-like file for the test
-      const tmpOfdPath = '/tmp/test-ocr-sample.ofd';
+      const tmpOfdPath = join(tmpdir(), 'test-ocr-sample.ofd');
       const { writeFileSync, unlinkSync, existsSync } = await import('fs');
       writeFileSync(tmpOfdPath, Buffer.from('OFD test content'));
 
@@ -454,8 +456,8 @@ describe('OcrService', () => {
       });
 
       // Create temp PDF and OFD files for the test
-      const tmpPdfPath = '/tmp/test-ocr-priority.pdf';
-      const tmpOfdPath = '/tmp/test-ocr-priority.ofd';
+      const tmpPdfPath = join(tmpdir(), 'test-ocr-priority.pdf');
+      const tmpOfdPath = join(tmpdir(), 'test-ocr-priority.ofd');
       const { writeFileSync, unlinkSync, existsSync } = await import('fs');
       writeFileSync(tmpPdfPath, Buffer.from('PDF test content'));
       writeFileSync(tmpOfdPath, Buffer.from('OFD test content'));
