@@ -14,3 +14,4 @@ __pycache__/
 *.pyc
 /excel-mcp-server/
 scripts/excel/.venv/
+/.codeartsdoer/
