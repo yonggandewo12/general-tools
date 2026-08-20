@@ -66,7 +66,7 @@ jobs:
           python -c "import pptx, openpyxl, PIL; print('python deps OK')"
 
   test-embedded-runtime:
-    # Verifies that npm ci pulls the matching @general-tools/python-runtime-*
+    # Verifies that npm ci pulls the matching general-tools-mcp-server-runtime-*
     # sub-package and that the embedded Python + wheels actually boot.
     # Build artifacts are produced by the publish workflow; this CI job runs
     # against whatever's already published on npm. When testing unreleased
@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           SUFFIX="${{ matrix.os == 'macos-latest' && 'darwin-arm64' || matrix.os == 'ubuntu-latest' && 'linux-x64-gnu' || 'win32-x64-msvc' }}"
-          PKG="@general-tools/python-runtime-${SUFFIX}"
+          PKG="general-tools-mcp-server-runtime-${SUFFIX}"
           if [ ! -d "node_modules/${PKG}" ]; then
             # The embedded runtime sub-package only exists after the first
             # successful publish. Until then, skip the rest of this job

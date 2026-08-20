@@ -3,7 +3,7 @@
  * scripts/excel/. Looks up Python in this priority order:
  *
  *   1. `PPT_MASTER_PYTHON` env override
- *   2. Embedded Python bundled by the matching @general-tools/python-runtime-*
+ *   2. Embedded Python bundled by the matching general-tools-mcp-server-runtime-*
  *      platform sub-package (downloaded with the npm package)
  *   3. System Python 3.10+ on PATH
  *
@@ -42,8 +42,8 @@ export class MissingPythonError extends Error {
   }
 }
 
-const PACKAGE_SCOPE = '@general-tools';
-const RUNTIME_PKG_PREFIX = `${PACKAGE_SCOPE}/python-runtime-`;
+const PACKAGE_SCOPE = ''; // Unscoped; main package is also unscoped to avoid npm org requirement.
+const RUNTIME_PKG_PREFIX = `general-tools-mcp-server-runtime-`;
 const PYTHON_MINOR = '3.12';
 
 /**
@@ -68,7 +68,7 @@ export const SUPPORTED_PLATFORM_SUFFIXES = [
 
 /**
  * Resolve the path to the embedded python binary shipped in the matching
- * `@general-tools/python-runtime-<suffix>/` npm sub-package. Returns `null`
+ * `general-tools-mcp-server-runtime-<suffix>/` npm sub-package. Returns `null`
  * if the sub-package is not installed (e.g., user is on an unsupported host
  * or removed optionalDependencies).
  */
@@ -188,7 +188,7 @@ export function findPython(): string {
   const suffix = platformSuffix();
   const pkgName = suffix ? `${RUNTIME_PKG_PREFIX}${suffix}` : null;
   const subpkgHint = pkgName
-    ? `If you installed general-tools-mcp-server via npm, ensure the optional dependency @general-tools/python-runtime-${suffix} is present (npm ls @general-tools/python-runtime-*).`
+    ? `If you installed general-tools-mcp-server via npm, ensure the optional dependency general-tools-mcp-server-runtime-${suffix} is present (npm ls general-tools-mcp-server-runtime-*).`
     : `Your host platform (${process.platform}-${process.arch}) is not one of: ${SUPPORTED_PLATFORM_SUFFIXES.join(', ')}.`;
   throw new MissingPythonError(
     `${installHintForOS()}\n${subpkgHint}`,

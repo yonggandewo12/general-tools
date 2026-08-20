@@ -178,7 +178,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          PKG="@general-tools/python-runtime-${{ matrix.platform }}"
+          PKG="general-tools-mcp-server-runtime-${{ matrix.platform }}"
 
           if npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; then
             echo "${PKG}@${VERSION} already published — skipping"
@@ -210,7 +210,7 @@ jobs:
         run: npm run build
 
       - name: Stamp optionalDependencies to this version
-        # Pin each @general-tools/python-runtime-* sub-package to the
+        # Pin each general-tools-mcp-server-runtime-* sub-package to the
         # exact version we're about to publish. Without this, npm would
         # resolve "1.0.0" to the latest matching range and could pick
         # a stale runtime build.

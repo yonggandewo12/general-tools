@@ -65,8 +65,8 @@ SMOKE_IMPORT_MODULES = [
     "svglib", "reportlab", "fitz", "numpy", "lxml",
 ]
 
-PACKAGE_SCOPE = "@general-tools"
-PACKAGE_NAME_TEMPLATE = f"{PACKAGE_SCOPE}/python-runtime-{{platform}}"
+PACKAGE_SCOPE = ""  # Unscoped to avoid requiring npm org creation; main package is also unscoped.
+PACKAGE_NAME_TEMPLATE = f"general-tools-mcp-server-runtime-{{platform}}"
 PACKAGE_DESCRIPTION = "Embedded Python 3.12 + pip deps for general-tools-mcp-server"
 
 

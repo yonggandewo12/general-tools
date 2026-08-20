@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bump the package version AND keep the 5 @general-tools/python-runtime-*
+ * Bump the package version AND keep the 5 general-tools-mcp-server-runtime-*
  * optionalDependencies in sync, so consumers of `npm install general-tools-mcp-server`
  * always pull matching-platform sub-packages.
  *
@@ -21,7 +21,7 @@ import { dirname, resolve } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_PATH = resolve(__dirname, '..', 'package.json');
 
-const RUNTIME_PKG_PREFIX = '@general-tools/python-runtime-';
+const RUNTIME_PKG_PREFIX = 'general-tools-mcp-server-runtime-';
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:[-+][\w.-]+)?$/;
 
 function parseVersion(v) {

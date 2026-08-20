@@ -35,7 +35,7 @@
 node --version
 ```
 
-**Python 已嵌入 npm 包，无需在主机上预先安装**。`@general-tools/python-runtime-<platform>` 子包会随 `npm install` 自动按平台拉取（darwin-arm64 / darwin-x64 / linux-x64-gnu / linux-arm64-gnu / win32-x64-msvc），内含 CPython 3.12 + 全部 pip 依赖（pptx、openpyxl、Pillow 等）。
+**Python 已嵌入 npm 包，无需在主机上预先安装**。`general-tools-mcp-server-runtime-<platform>` 子包会随 `npm install` 自动按平台拉取（darwin-arm64 / linux-x64-gnu / linux-arm64-gnu / win32-x64-msvc），内含 CPython 3.12 + 全部 pip 依赖（pptx、openpyxl、Pillow 等）。
 
 如果想用主机上自带的 Python（向后兼容），设置 `PPT_MASTER_PYTHON` 即可跳过嵌入运行时。
 
@@ -98,11 +98,10 @@ claude mcp add general-tools \
 
 | 平台子包 | 适用主机 |
 |---|---|
-| `@general-tools/python-runtime-darwin-arm64` | macOS Apple Silicon（M1/M2/M3/M4） |
-| `@general-tools/python-runtime-darwin-x64` | macOS Intel（x86_64） |
-| `@general-tools/python-runtime-linux-x64-gnu` | Linux x86_64（glibc ≥ 2.31） |
-| `@general-tools/python-runtime-linux-arm64-gnu` | Linux ARM64（glibc ≥ 2.31） |
-| `@general-tools/python-runtime-win32-x64-msvc` | Windows 10/11 x64 |
+| `general-tools-mcp-server-runtime-darwin-arm64` | macOS Apple Silicon（M1/M2/M3/M4） |
+| `general-tools-mcp-server-runtime-linux-x64-gnu` | Linux x86_64（glibc ≥ 2.31） |
+| `general-tools-mcp-server-runtime-linux-arm64-gnu` | Linux ARM64（glibc ≥ 2.31） |
+| `general-tools-mcp-server-runtime-win32-x64-msvc` | Windows 10/11 x64 |
 
 > 区别于 `@firecrawl/pdf-inspector`（仅 ARM64），本项目显式覆盖 **Intel Mac 与 Windows**。
 
@@ -112,7 +111,7 @@ claude mcp add general-tools \
 
 ```bash
 SUFFIX=$(node -e "console.log(process.platform+'-'+process.arch)")
-PY="$(node -e "console.log(require.resolve('@general-tools/python-runtime-'+'$SUFFIX'+'/package.json').replace('/package.json','/python/bin/python3.12'))")"
+PY="$(node -e "console.log(require.resolve('general-tools-mcp-server-runtime-'+'$SUFFIX'+'/package.json').replace('/package.json','/python/bin/python3.12'))")"
 xattr -dr com.apple.quarantine "$PY"
 "$PY" --version   # → Python 3.12.14
 ```
@@ -123,7 +122,7 @@ xattr -dr com.apple.quarantine "$PY"
 
 ```powershell
 # 方式 A — PowerShell 一键解锁
-Unblock-File "$env:USERPROFILE\node_modules\@general-tools\python-runtime-win32-x64-msvc\python\python.exe"
+Unblock-File "$env:USERPROFILE\node_modules\general-tools-mcp-server-runtime-win32-x64-msvc\python\python.exe"
 
 # 方式 B — 文件资源管理器
 # 右键 python.exe → Properties → 勾选 "Unblock" → Apply

@@ -1,6 +1,6 @@
 {
   "name": "general-tools-mcp-server",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "MCP server for HTML/Markdown/PDF conversion, OCR, PPT generation, AI image generation, and document-to-Markdown conversion",
   "type": "module",
   "bin": {
@@ -28,10 +28,10 @@
     "x64"
   ],
   "optionalDependencies": {
-    "@general-tools/python-runtime-darwin-arm64": "1.2.3",
-    "@general-tools/python-runtime-linux-x64-gnu": "1.2.3",
-    "@general-tools/python-runtime-linux-arm64-gnu": "1.2.3",
-    "@general-tools/python-runtime-win32-x64-msvc": "1.2.3"
+    "general-tools-mcp-server-runtime-darwin-arm64": "1.2.4",
+    "general-tools-mcp-server-runtime-linux-x64-gnu": "1.2.4",
+    "general-tools-mcp-server-runtime-linux-arm64-gnu": "1.2.4",
+    "general-tools-mcp-server-runtime-win32-x64-msvc": "1.2.4"
   },
   "scripts": {
     "build": "tsc",
