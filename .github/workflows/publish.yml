@@ -70,7 +70,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - uses: actions/setup-python@v5
         with:
@@ -116,7 +115,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - uses: actions/setup-python@v5
         with:
@@ -192,7 +190,7 @@ jobs:
           echo "=== Publishing ${PKG}@${VERSION} ==="
           ls -la
           cat package.json
-          npm publish --access public
+          npm publish --access public --tag latest
 
   publish-main:
     name: Publish main package
@@ -241,4 +239,4 @@ jobs:
             echo "general-tools-mcp-server@${VERSION} already published — skipping"
             exit 0
           fi
-          npm publish --access public
+          npm publish --access public --tag latest

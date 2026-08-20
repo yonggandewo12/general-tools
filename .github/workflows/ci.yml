@@ -29,7 +29,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - uses: actions/setup-python@v5
         with:
@@ -87,7 +86,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Install Node dependencies
         run: npm install --allow-remote=all --no-audit --no-fund
