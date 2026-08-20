@@ -122,7 +122,20 @@ def extract_pbs(tarball: Path, out_dir: Path) -> Path:
 
 
 def install_pip_deps(python_dir: Path, out_dir: Path) -> None:
-    """pip install all requirements into the embedded Python's site-packages."""
+    """pip install all requirements into the embedded Python's site-packages.
+
+    On POSIX (PBS install_only_stripped layout): default site-packages is
+    `<python>/lib/python3.12/site-packages`, auto-discovered via sys.path.
+
+    On Windows (PBS install_only_stripped layout): default site-packages is
+    `<python>/Lib/site-packages` (capital L, no version subdir), locked in
+    by the bundled `python3xx._pth` file. Using `--target` to write into a
+    non-default path makes the smoke-test invocation fail with
+    ModuleNotFoundError because that path is not on sys.path.
+
+    Solution: drop `--target` so pip installs into the auto-detected
+    site-packages, which the smoke test can then import directly.
+    """
     python_bin = python_dir / "bin" / PYTHON_BIN_NAME
     if not python_bin.exists():
         # On Windows: python.exe is at python/ (no bin/ subdir)
@@ -130,18 +143,14 @@ def install_pip_deps(python_dir: Path, out_dir: Path) -> None:
         if win_bin.exists():
             python_bin = win_bin
 
-    site_packages = python_dir / "lib" / f"python{'.'.join(PYTHON_VERSION.split('.')[:2])}" / "site-packages"
-    site_packages.mkdir(parents=True, exist_ok=True)
-
     for req_file in REQUIREMENTS_FILES:
         if not Path(req_file).exists():
             log(f"WARN: requirements file missing: {req_file} (skipping)")
             continue
-        log(f"pip install -t {site_packages} -r {req_file}")
+        log(f"pip install --prefer-binary -r {req_file}")
         run([
             str(python_bin), "-m", "pip", "install",
             "--prefer-binary",
-            "-t", str(site_packages),
             "-r", req_file,
         ], check=False)  # some packages (like pandoc fallbacks) may not be on PyPI
 
