@@ -150,6 +150,12 @@ jobs:
           name: runtime-${{ matrix.platform }}
           path: npm-dist/${{ matrix.platform }}
           if-no-files-found: error
+          # Pillow macOS wheels bundle shared libs under PIL/.dylibs/ (a
+          # dot-prefixed directory). upload-artifact@v4 defaults to
+          # include-hidden-files:false and silently strips dotfiles, which
+          # would ship a runtime whose _imaging.so cannot dlopen libtiff
+          # etc. Must keep hidden files so .dylibs reaches the tarball.
+          include-hidden-files: true
           # Default retention (90 days). The daily clean.yml job deletes
           # every artifact on every run, so this retention is moot — it
           # only matters if cleanup fails for several days.

@@ -307,13 +307,24 @@ def macos_unquarantine(python_dir: Path) -> None:
 
 
 def smoke_test(python_dir: Path) -> None:
-    """Verify the embedded Python can import all required modules."""
+    """Verify the embedded Python can import all required modules.
+
+    `import PIL` alone only loads PIL/__init__.py and does NOT trigger the
+    `_imaging` C extension, so a broken Pillow install (e.g. the macOS
+    wheel's .dylibs stripped during artifact upload) would silently pass.
+    Load `PIL.Image` explicitly to force _imaging to dlopen its bundled
+    dylibs and fail the build early.
+    """
     python_bin = python_dir / "bin" / PYTHON_BIN_NAME
     if not python_bin.exists():
         python_bin = python_dir / PYTHON_BIN_NAME
     smoke = ", ".join(SMOKE_IMPORT_MODULES)
     log(f"smoke import: {smoke}")
     run([str(python_bin), "-c", f"import {smoke}; print('embedded python OK')"])
+    # Force PIL's C extension to load; catches missing .dylibs on macOS
+    # wheels that `import PIL` alone would miss.
+    log("smoke load: PIL.Image (forces _imaging dylib loading)")
+    run([str(python_bin), "-c", "from PIL import Image; print('PIL Image OK')"])
 
 
 def main() -> int:
