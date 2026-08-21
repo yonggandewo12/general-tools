@@ -189,8 +189,14 @@ jobs:
         shell: bash
         run: |
           cd "npm-dist/${{ matrix.platform }}"
-          TARBALL=$(mktemp -t runtime-XXXXXX.tgz)
-          npm pack --silent > "$TARBALL"
+          # npm pack writes the .tgz into --pack-destination and prints the
+          # filename to stdout. Resolve the file explicitly so we don't depend
+          # on npm's stdout format, which varies across npm versions (and
+          # redirecting stdout would store the filename text, not the gzip).
+          PKGDIR=$(mktemp -d)
+          npm pack --silent --pack-destination "$PKGDIR" >/dev/null 2>&1
+          TARBALL=$(ls -t "$PKGDIR"/*.tgz | head -1)
+          echo "packed: $TARBALL"
 
           echo "=== python3.12 in tarball ==="
           tar -tvzf "$TARBALL" | grep "package/python/bin/python3.12$"
@@ -216,7 +222,7 @@ jobs:
             echo "No embedded chromium for ${{ matrix.platform }} (expected for linux-arm64)"
           fi
 
-          rm "$TARBALL"
+          rm -rf "$PKGDIR"
 
       - name: Publish runtime sub-package
         env:
