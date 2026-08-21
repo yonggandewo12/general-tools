@@ -128,16 +128,35 @@ async function embedChineseFont(
 }
 
 /**
+ * 为文字水印预嵌入字体。
+ * - 含中文：嵌入中文字体，无可用中文字体时返回 null（调用方应跳过绘制，
+ *   因为 pdf-lib 的 Helvetica 无法编码 CJK，回退会抛 WinAnsi 错误）。
+ * - 纯英文：用 Helvetica。
+ * 结果应缓存并复用于所有页面。
+ */
+async function resolveWatermarkFont(
+  watermarkText: string,
+  pdfDoc: PDFDocument,
+): Promise<import('pdf-lib').PDFFont | null> {
+  if (hasChinese(watermarkText)) {
+    return embedChineseFont(pdfDoc);
+  }
+  return pdfDoc.embedFont(StandardFonts.Helvetica);
+}
+
+/**
  * 对角线平铺文字水印的绘制逻辑（doc-ops-mcp 移植）。
- * font 由调用方预嵌入并缓存，避免多页文档每页重复嵌入字体（性能）。
+ * font 由调用方预嵌入并缓存；null 表示该文本无可用字体（如中文无中文字体），
+ * 跳过绘制以保证操作不崩溃。
  */
 async function drawTextWatermark(
   page: import('pdf-lib').PDFPage,
   watermarkText: string,
   fontSize: number,
   opacity: number,
-  font: import('pdf-lib').PDFFont,
+  font: import('pdf-lib').PDFFont | null,
 ): Promise<void> {
+  if (!font) return; // 无可用字体（如无中文字体时中文水印），跳过绘制
   const { width, height } = page.getSize();
   const angle = -30;
   const spacingX = fontSize * 8;
@@ -165,20 +184,6 @@ async function drawTextWatermark(
       });
     }
   }
-}
-
-/**
- * 为文字水印预嵌入字体：含中文时嵌入中文字体（失败回退 Helvetica），
- * 否则用 Helvetica。结果应缓存并复用于所有页面。
- */
-async function resolveWatermarkFont(
-  watermarkText: string,
-  pdfDoc: PDFDocument,
-): Promise<import('pdf-lib').PDFFont> {
-  if (hasChinese(watermarkText)) {
-    return (await embedChineseFont(pdfDoc)) ?? (await pdfDoc.embedFont(StandardFonts.Helvetica));
-  }
-  return pdfDoc.embedFont(StandardFonts.Helvetica);
 }
 
 /** 图片水印按锚点位置放置（doc-ops-mcp 移植）。
@@ -311,11 +316,11 @@ export class PdfPostProcessor {
 
       for (const page of pages) {
         if (opts.watermarkText) {
-          await drawTextWatermark(page, opts.watermarkText, opts.watermarkFontSize ?? 8, opts.watermarkTextOpacity ?? 0.3, font as import('pdf-lib').PDFFont);
+          await drawTextWatermark(page, opts.watermarkText, opts.watermarkFontSize ?? 8, opts.watermarkTextOpacity ?? 0.3, font);
         } else if (usesImageWatermark) {
           await drawImageWatermark(page, watermarkImage as import('pdf-lib').PDFImage, opts);
         } else {
-          await drawTextWatermark(page, 'CONFIDENTIAL', opts.watermarkFontSize ?? 8, opts.watermarkTextOpacity ?? 0.3, font as import('pdf-lib').PDFFont);
+          await drawTextWatermark(page, 'CONFIDENTIAL', opts.watermarkFontSize ?? 8, opts.watermarkTextOpacity ?? 0.3, font);
         }
       }
 
@@ -361,17 +366,19 @@ export class PdfPostProcessor {
         if (opts.addText !== false) {
           const text = opts.customText ?? 'Scan QR code for more information';
           const textSize = opts.textSize ?? 8;
-          // 含中文时需嵌入中文字体，否则 WinAnsi 编码失败
+          // 含中文时需嵌入中文字体；无中文字体时跳过文字绘制（Helvetica 无法编码 CJK）
           const font = hasChinese(text)
-            ? ((await embedChineseFont(pdfDoc)) ?? (await pdfDoc.embedFont(StandardFonts.Helvetica)))
+            ? await embedChineseFont(pdfDoc)
             : await pdfDoc.embedFont(StandardFonts.Helvetica);
-          lastPage.drawText(text, {
-            x: x + (qrWidth - text.length * textSize * 0.6) / 2,
-            y: y - 15,
-            size: textSize,
-            font,
-            color: hexToRgb(opts.textColor ?? '#000000'),
-          });
+          if (font) {
+            lastPage.drawText(text, {
+              x: x + (qrWidth - text.length * textSize * 0.6) / 2,
+              y: y - 15,
+              size: textSize,
+              font,
+              color: hexToRgb(opts.textColor ?? '#000000'),
+            });
+          }
         }
       }
 

@@ -92,7 +92,7 @@ describe('PDF 后处理（pdf-lib）', () => {
     const pdf = path.join(dir, 'cn.pdf');
     await fs.writeFile(pdf, MINI_PDF);
     const r = await pdfPostProcessor.addWatermark(pdf, { watermarkText: '机密文件' });
-    // 中文字体嵌入失败也应回退而非崩溃
+    // 中文字体嵌入失败也应回退而非崩溃（无中文字体时跳过绘制，不抛 WinAnsi 错误）
     expect(r.success).toBe(true);
     await fs.rm(dir, { recursive: true, force: true });
   });
