@@ -54,6 +54,7 @@ PYTHON_BIN_NAME = "python.exe" if platform.system() == "Windows" else "python3.1
 REQUIREMENTS_FILES = [
     "scripts/ppt-master/requirements.txt",
     "scripts/excel/requirements.txt",
+    "scripts/docx/requirements.txt",
 ]
 
 # Modules the embedded Python must successfully import (smoke check).
@@ -63,6 +64,7 @@ SMOKE_IMPORT_MODULES = [
     "requests", "bs4", "curl_cffi",
     "google.genai", "flask", "edge_tts",
     "svglib", "reportlab", "fitz", "numpy", "lxml",
+    "docx",
 ]
 
 PACKAGE_SCOPE = ""  # Unscoped to avoid requiring npm org creation; main package is also unscoped.
@@ -259,7 +261,7 @@ def copy_scripts(out_dir: Path) -> None:
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True)
-    for src in ("scripts/ppt-master", "scripts/excel"):
+    for src in ("scripts/ppt-master", "scripts/excel", "scripts/docx"):
         if not Path(src).exists():
             log(f"WARN: source script dir missing: {src}")
             continue

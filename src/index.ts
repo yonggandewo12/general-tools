@@ -19,6 +19,9 @@ import { extractPdf } from './pdf-extract-adapter.js';
 import { PptMasterService } from './ppt-master-service.js';
 import { ExcelService } from './excel-service.js';
 import { EXCEL_TOOLS, EXCEL_ACTION_MAP } from './excel-tools.js';
+import { DOCX_TOOLS, DOCX_ACTION_MAP } from './docx-tools.js';
+import { getDocxService } from './docx-service.js';
+import { pdfPostProcessor } from './pdf-postprocess.js';
 
 /**
  * Read the package version once at startup so the MCP server advertises the
@@ -651,7 +654,7 @@ class Md2PdfServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL, GENERATE_PRESENTATION_TOOL, GENERATE_IMAGE_TOOL, CONVERT_TO_MARKDOWN_TOOL, ...EXCEL_TOOLS]
+        tools: [CONVERT_HTML_TO_PDF_TOOL, CONVERT_HTML_TO_IMAGE_TOOL, CONVERT_MD_TO_HTML_TOOL, CONVERT_MD_TO_PDF_TOOL, RECOGNIZE_TEXT_TOOL, EXTRACT_PDF_TEXT_TOOL, SCREENSHOT_PDF_TOOL, GENERATE_PRESENTATION_TOOL, GENERATE_IMAGE_TOOL, CONVERT_TO_MARKDOWN_TOOL, ...EXCEL_TOOLS, ...DOCX_TOOLS]
       };
     });
 
@@ -1124,6 +1127,52 @@ class Md2PdfServer {
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
+            isError: true,
+          };
+        }
+      }
+
+      const docxAction = DOCX_ACTION_MAP[name];
+      if (docxAction) {
+        try {
+          const argsObj = (args as Record<string, unknown>) ?? {};
+          let result: unknown;
+          if (docxAction.startsWith('edit:')) {
+            // python-docx 子进程编辑已有文档
+            result = await getDocxService().editDocument(docxAction.slice(5), argsObj);
+          } else if (docxAction.startsWith('pdf:')) {
+            // pdf-lib 水印/二维码（纯 JS）
+            const method = docxAction.slice(4) as 'add_watermark' | 'add_qrcode';
+            if (method === 'add_watermark') {
+              result = await pdfPostProcessor.addWatermark(argsObj.pdfPath as string, argsObj);
+            } else {
+              result = await pdfPostProcessor.addQrCode(argsObj.pdfPath as string, argsObj.qrCodePath as string, argsObj);
+            }
+          } else {
+            // 纯 JS docx 生成
+            const svc = getDocxService();
+            switch (docxAction) {
+              case 'create_document':
+                result = await svc.createDocument(argsObj.content as string, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined });
+                break;
+              case 'convert_md_to_docx':
+                result = await svc.convertMdToDocx(argsObj.mdContent as string, undefined, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined, embedImages: argsObj.embedImages as boolean | undefined });
+                break;
+              case 'convert_html_to_docx':
+                result = await svc.convertHtmlToDocx(argsObj.htmlContent as string, argsObj.outputPath as string | undefined);
+                break;
+              default:
+                throw new Error(`Unknown docx action: ${docxAction}`);
+            }
+          }
+          const ok = (result as { success?: boolean } | undefined)?.success !== false;
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            isError: !ok,
           };
         } catch (error) {
           return {

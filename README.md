@@ -23,6 +23,9 @@
 - **AI 图片生成** — 对接 18+ 后端（OpenAI、Gemini、Qwen、Agnes AI 等），支持文生图和图生图
 - **文档转 Markdown** — PDF、DOCX、Excel、PowerPoint、网页 → 结构化 Markdown
 - **Excel 操作** — 创建/读写工作簿、格式化、公式、合并、图表、透视汇总表、原生 Table、行列增删、数据验证（25 个工具，基于 openpyxl）
+- **DOCX 生成** — HTML/Markdown/纯文本 → 带样式的 Word 文档（基于 `docx` npm 包，纯 JS）
+- **DOCX 编辑** — 打开已有 .docx 改段落/插图片/插表格/改样式/读结构（基于 python-docx，已嵌入运行时）
+- **PDF 后处理** — 给 PDF 加文字/图片水印、嵌入二维码（基于 pdf-lib，纯 JS）
 
 ---
 
@@ -76,7 +79,7 @@ node --version
 
 如果想用主机上自带的 Python（向后兼容），设置 `PPT_MASTER_PYTHON` 即可跳过嵌入运行时。
 
-> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定）；PDF 转换走 `@firecrawl/pdf-inspector`（Rust + NAPI）；嵌入的 Python 仅用于 PPT 生成（`generate_presentation`）、25 个 `excel_*` 工具、`convert_to_markdown` 的 HTML/IPYNB/Web/Office-fallback 路径。`@firecrawl/anydoc` 与 `@firecrawl/pdf-inspector` 的预编译二进制都以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install --allow-remote=all` 一次性装齐。
+> **说明**：`convert_to_markdown` 的 Office 文档转换（Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV）默认走内置 anydoc 内核（Rust 编译、Node 绑定）；PDF 转换走 `@firecrawl/pdf-inspector`（Rust + NAPI）；嵌入的 Python 仅用于 PPT 生成（`generate_presentation`）、25 个 `excel_*` 工具、DOCX 编辑（`docx_read_document`/`docx_edit_paragraph`/`docx_add_paragraph`/`docx_insert_image`/`docx_insert_table`/`docx_change_style` 等）、`convert_to_markdown` 的 HTML/IPYNB/Web/Office-fallback 路径。`@firecrawl/anydoc` 与 `@firecrawl/pdf-inspector` 的预编译二进制都以 remote URL 依赖分发，若本机 `npm` 开启了 `allow-remote=none`，需用 `npm install --allow-remote=all` 一次性装齐。
 
 ### 第二步：安装项目依赖
 
@@ -95,6 +98,7 @@ npm run build
 ```bash
 python3.12 -m pip install --break-system-packages -r scripts/ppt-master/requirements.txt
 python3.12 -m pip install --break-system-packages -r scripts/excel/requirements.txt
+python3.12 -m pip install --break-system-packages -r scripts/docx/requirements.txt
 ```
 
 ### 第三步：配置 Claude Code MCP（可选）
@@ -127,7 +131,7 @@ claude mcp add general-tools \
 > - **Claude Code（项目级）：** `.claude.json`
 > - **Claude Desktop：** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-配置后重启 Claude Code，执行 `claude mcp list` 应看到 35 个工具（10 个通用 + 25 个 Excel）。
+配置后重启 Claude Code，执行 `claude mcp list` 应看到 48 个工具（10 个通用 + 25 个 Excel + 13 个 DOCX/PDF）。
 
 ### 平台支持与首次运行提示
 
@@ -196,7 +200,7 @@ claude mcp add general-tools \
 | **OCR 文字识别** | `recognize_text` | `BAIDU_OCR_API_KEY` + `BAIDU_OCR_SECRET_KEY` | [百度智能云](https://console.bce.baidu.com/ai/#/ai/ocr/overview/index) 创建应用 |
 | **AI 图片生成** | `generate_image` | `IMAGE_BACKEND` + 对应后端 API Key（见下方） | 选择一家服务商 |
 | **PDF OCR 路由** | `extract_pdf_text` / `convert_to_markdown` (PDF) | `PDFIUM_LIB_PATH` + `ORT_DYLIB_PATH`（仅扫描型 PDF 需 OCR 时） | 默认走纯文本提取，扫描型 PDF 文本不可靠时才启用 |
-| **Python 路径**（可选） | `generate_presentation` / `excel_*` / `convert_to_markdown`（HTML/IPYNB/Web/Office-fallback） | `PPT_MASTER_PYTHON`（默认用嵌入 Python；设置后改用主机 Python） | 仅当嵌入 Python 出问题时回退到系统 Python |
+| **Python 路径**（可选） | `generate_presentation` / `excel_*` / `docx_edit_*` / `docx_insert_*` / `convert_to_markdown`（HTML/IPYNB/Web/Office-fallback） | `PPT_MASTER_PYTHON`（默认用嵌入 Python；设置后改用主机 Python） | 仅当嵌入 Python 出问题时回退到系统 Python |
 
 **AI 图片生成后端选择（`IMAGE_BACKEND` + 对应 Key）：**
 
@@ -508,6 +512,40 @@ Claude，把 https://example.com 转为 Markdown
 > **依赖**：openpyxl 已嵌入运行时，无需手动安装。Python 路径默认用嵌入 Python；可用 `PPT_MASTER_PYTHON` 改用系统 Python。
 | `timeout` | number | 超时(ms) | 120000 |
 
+### 工具 34–46：DOCX / PDF 后处理（`docx_*` / `pdf_*`）
+
+13 个工具，分三组能力：
+
+**DOCX 生成**（基于 `docx` npm 包，纯 JS，无 Python 依赖）：
+
+| 工具 | 说明 |
+|------|------|
+| `docx_create_document` | 从 HTML 内容（或纯文本，自动包装）创建带样式的 .docx |
+| `docx_convert_md_to_docx` | Markdown 内容 → .docx（经 markdown→HTML→DOCX 管线，保留标题/粗斜体/列表/表格/代码块） |
+| `docx_convert_html_to_docx` | HTML 内容 → .docx（h1-h6/p/strong/em/ul/ol/table/blockquote/pre 样式映射，含 XSS 清洗） |
+
+**DOCX 编辑已有文档**（基于 python-docx，子进程调用，python-docx 已嵌入运行时）：
+
+| 工具 | 说明 |
+|------|------|
+| `docx_read_document` | 读取 .docx 结构：段落文本/样式/对齐、表格数、节数、内嵌图片数 |
+| `docx_edit_paragraph` | 修改指定段落文字（可选改样式） |
+| `docx_add_paragraph` | 文档末尾追加段落（支持粗体/斜体/字号/对齐/样式） |
+| `docx_insert_image` | 在指定段落后插入图片（宽高以英寸计，可省略用原始尺寸） |
+| `docx_insert_table` | 文档末尾插入表格（二维数据或空网格，带网格样式） |
+| `docx_change_style` | 修改段落样式（如 Heading 1 / Title / Normal） |
+| `docx_list_tables` | 列出所有表格尺寸与首行预览 |
+| `docx_available_styles` | 列出文档可用样式名 |
+
+**PDF 后处理**（基于 pdf-lib，纯 JS，无外部进程）：
+
+| 工具 | 说明 |
+|------|------|
+| `pdf_add_watermark` | 给 PDF 加文字水印（-30° 斜向平铺，中文自动嵌入系统中文字体）或图片水印（6 种锚点位置，含 fullscreen） |
+| `pdf_add_qrcode` | 在 PDF 末页嵌入二维码图片 + 可选说明文字（中文说明自动嵌入中文字体） |
+
+> **依赖**：python-docx 已嵌入运行时（`scripts/build-platform-package.py` 打包），无需手动安装；`docx`/`pdf-lib` 为 npm dependencies，随主包分发。
+
 ---
 
 ## 架构
@@ -520,12 +558,19 @@ general-tools/
 │   ├── ocr-service.ts        # 百度 OCR 文字识别服务
 │   ├── pdf-converter.ts      # Puppeteer PDF 转换核心
 │   ├── pdf-extractor.ts      # LiteParse PDF 文本/截图提取
+│   ├── pdf-postprocess.ts    # PDF 水印/二维码（pdf-lib）
+│   ├── html-to-docx.ts       # HTML → DOCX 转换器（docx npm 包）
+│   ├── docx-service.ts       # DOCX 生成（纯 JS）+ 编辑（python-docx 子进程）
+│   ├── docx-tools.ts         # DOCX/PDF 工具 schema 与 action 映射
 │   ├── python-runner.ts      # Python 脚本执行器（PPT 相关工具底层）
 │   ├── ppt-master-service.ts # PPT 生成、图片生成、Markdown 转换服务
 │   └── types.ts              # TypeScript 类型定义
 ├── scripts/
-│   └── ppt-master/
-│       └── scripts/          # ppt-master Python 脚本（svg_to_pptx 等）
+│   ├── ppt-master/
+│   │   └── scripts/          # ppt-master Python 脚本（svg_to_pptx 等）
+│   └── docx/
+│       ├── run.py            # DOCX 编辑子进程入口
+│       └── docx_mcp/         # python-docx 编辑动作模块
 ├── sample.html
 ├── e2e-ppt-master.ts
 └── dist/                     # 编译产物

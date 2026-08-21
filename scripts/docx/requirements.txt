@@ -1,0 +1,3 @@
+# DOCX MCP dependencies
+# Install: pip install -r scripts/docx/requirements.txt
+python-docx>=1.1.0
