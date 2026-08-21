@@ -72,7 +72,7 @@ ldd --version | head -1
 node --version
 ```
 
-**Python 已嵌入 npm 包，无需在主机上预先安装**。`general-tools-mcp-server-runtime-<platform>` 子包会随 `npm install` 自动按平台拉取（darwin-arm64 / linux-x64-gnu / linux-arm64-gnu / win32-x64-msvc），内含 CPython 3.12 + 全部 pip 依赖（pptx、openpyxl、Pillow 等）+ Chrome Headless Shell（PDF 转换用；linux-arm64 无上游 arm64 构建，该平台 PDF 转换需自装浏览器）。
+**Python 已嵌入 npm 包，无需在主机上预先安装**。`general-tools-mcp-server-runtime-<platform>` 子包会随 `npm install` 自动按平台拉取（darwin-arm64 / linux-x64-gnu / linux-arm64-gnu / win32-x64-msvc），内含 CPython 3.12 + 全部 pip 依赖（pptx、openpyxl、Pillow 等）。
 
 如果想用主机上自带的 Python（向后兼容），设置 `PPT_MASTER_PYTHON` 即可跳过嵌入运行时。
 
@@ -549,7 +549,15 @@ Markdown → md-converter.ts → 完整 HTML（含样式/目录/Mermaid）
 - **npm** 9+
 - **Python** 3.10+（PPT 相关工具需要，自动检测 python3.12/3.11/3.10）
 - **内存** 最低 512MB，推荐 1GB+
-- **Chromium**（chrome-headless-shell）已随 runtime 子包嵌入，无需手动安装（linux-arm64 除外——上游无 arm64 构建，该平台 PDF 转换需自装浏览器）
+- **Chromium**（PDF/图片转换用）：首次使用 `convert_to_pdf`/`convert_to_image` 前，运行一次安装命令（约 15 秒，缓存到 `~/.cache/puppeteer/`，之后跨重装复用）；或安装 Google Chrome 后自动兜底使用。已装 Chrome 的机器无需手动安装：
+
+  ```bash
+  # 安装 Chrome Headless Shell（国内加速走 npmmirror 镜像）
+  npx puppeteer browsers install chrome-headless-shell \
+    --base-url https://registry.npmmirror.com/-/binary/chrome-for-testing
+
+  # 或直接用系统已装的 Google Chrome（无需上面命令）
+  ```
 
 ### 中韩文/Emoji 字体（可选）
 

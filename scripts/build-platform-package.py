@@ -49,20 +49,6 @@ PLATFORM_TO_OS_CPU = {
     "win32-x64-msvc":  (["win32"],      ["x64"]),
 }
 
-# Puppeteer `browsers install` platform names (not the same as our triples).
-PLATFORM_TO_PUPPETEER = {
-    "darwin-arm64":    "mac_arm",
-    "darwin-x64":      "mac",
-    "linux-x64-gnu":   "linux",
-    "win32-x64-msvc":  "win64",
-}
-
-# Chrome for Testing / chrome-headless-shell publish x64 Linux builds only
-# (see @puppeteer/browsers chrome.js + chrome-headless-shell.js folder()).
-# On arm64 the downloaded x64 binary can't execute, so those platforms ship
-# without an embedded browser and PdfConverter falls back to system Chrome.
-CHROMIUM_UNSUPPORTED = {"linux-arm64-gnu"}
-
 PYTHON_BIN_NAME = "python.exe" if platform.system() == "Windows" else "python3.12"
 
 REQUIREMENTS_FILES = [
@@ -182,71 +168,6 @@ def install_pip_deps(python_dir: Path, out_dir: Path) -> None:
         ], check=False)  # some packages (like pandoc fallbacks) may not be on PyPI
 
 
-def install_chromium(out_dir: Path, platform_triple: str) -> None:
-    """Download Puppeteer's pinned Chrome Headless Shell and stage it flat
-    under <out_dir>/chromium/.
-
-    PDF conversion needs a headless browser; shipping it inside the runtime
-    sub-package (like the embedded Python) makes convert_to_pdf work on a
-    fresh machine with no network access and no puppeteer postinstall.
-
-    Chrome for Testing publishes x64 Linux only, so linux-arm64 skips and
-    PdfConverter falls back to the system Chrome (or a manually installed
-    headless shell).
-    """
-    if platform_triple in CHROMIUM_UNSUPPORTED:
-        log(f"Skipping chromium for {platform_triple} (no upstream linux-arm64 build)")
-        return
-
-    puppeteer_platform = PLATFORM_TO_PUPPETEER[platform_triple]
-    chromium_dir = out_dir / "chromium"
-    if chromium_dir.exists():
-        shutil.rmtree(chromium_dir)
-    chromium_dir.mkdir(parents=True)
-
-    log(f"puppeteer browsers install chrome-headless-shell --platform {puppeteer_platform}")
-    # --no-install forces npx to use the local puppeteer (same pinned revision
-    # as the main package) instead of fetching a latest from the registry.
-    # Resolve npx via shutil.which: on Windows the executable is `npx.cmd`,
-    # which subprocess can run directly with the full path (no shell=True).
-    npx = shutil.which("npx")
-    if not npx:
-        raise SystemExit("npx not found on PATH (Node.js >= 18 is required)")
-    proc = subprocess.run(
-        [npx, "--no-install", "puppeteer", "browsers", "install",
-         "chrome-headless-shell", "--platform", puppeteer_platform],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        raise SystemExit(
-            f"Failed to install chrome-headless-shell for {platform_triple}: "
-            f"{proc.stderr.strip() or proc.stdout.strip()}"
-        )
-
-    # Output ends with "<browser>@<buildId> <path>". Skip npm's own notices
-    # and any trailing blank lines.
-    lines = [
-        l for l in proc.stdout.splitlines()
-        if l.strip() and not l.startswith("npm notice")
-    ]
-    if not lines:
-        raise SystemExit(f"Unexpected puppeteer install output: {proc.stdout!r}")
-    exe_path = Path(lines[-1].rsplit(" ", 1)[-1].strip())
-    if not exe_path.is_file() or not exe_path.name.startswith("chrome-headless-shell"):
-        raise SystemExit(f"puppeteer reported unexpected executable: {exe_path}")
-
-    # Flatten the browser dir into chromium/ so the binary and its
-    # .pak/.dylib assets stay together under a stable layout.
-    for item in exe_path.parent.iterdir():
-        dest = chromium_dir / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest)
-        else:
-            shutil.copy2(item, dest)
-    os.chmod(chromium_dir / exe_path.name, 0o755)
-    log(f"staged chrome-headless-shell in {chromium_dir}")
-
-
 def rewrite_pip_wrappers(python_dir: Path) -> None:
     """Rewrite pip-installed entry-point scripts to use a PBS-style sh wrapper.
 
@@ -355,8 +276,7 @@ def write_package_json(platform_triple: str, version: str, out_dir: Path) -> Non
         "name": pkg_name,
         "version": version,
         "description": PACKAGE_DESCRIPTION,
-        "main": "python/index.js",
-        "files": ["python/", "scripts/", "chromium/"],
+        "files": ["python/", "scripts/"],
         "os": os_values,
         "cpu": cpu_values,
         "engines": {"node": ">=18"},
@@ -423,9 +343,6 @@ def main() -> int:
 
         # Step 4: copy Python scripts (preserving directory layout)
         copy_scripts(out_dir)
-
-        # Step 4.5: stage embedded Chrome Headless Shell for PDF conversion
-        install_chromium(out_dir, args.platform)
 
         # Step 5: write platform sub-package.json
         write_package_json(args.platform, args.version, out_dir)

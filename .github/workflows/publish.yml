@@ -181,28 +181,19 @@ jobs:
           path: npm-dist/${{ matrix.platform }}
 
       - name: Verify executable bits in tarball
-        # Regression guard: python3.12 and the embedded Chromium must land in
-        # the npm tarball with +x (PBS bundles python 0775 but Python 3.12's
-        # tarfile.extract() doesn't restore mode). upload/download-artifact
-        # can also strip exec bits across runners, so restore them first,
-        # then confirm what will actually be published.
-        #
-        # Windows never relies on the exec bit (.exe launchers run without
-        # it), so win32 skips the +x checks entirely.
+        # Regression guard: python3.12 must land in the npm tarball with +x
+        # (PBS bundles python 0775 but Python 3.12's tarfile.extract() doesn't
+        # restore mode). upload/download-artifact can also strip exec bits
+        # across runners, so restore them first. Windows never relies on
+        # the exec bit (.exe launchers run without it), so win32 skips.
         shell: bash
         run: |
           cd "npm-dist/${{ matrix.platform }}"
 
           if [[ "${{ matrix.platform }}" != win32-* ]]; then
-            # Restore exec bits lost by the artifact round-trip.
             chmod +x python/bin/python3.12
-            [ -f chromium/chrome-headless-shell ] && chmod +x chromium/chrome-headless-shell
           fi
 
-          # npm pack writes the .tgz into --pack-destination and prints the
-          # filename to stdout. Resolve the file explicitly so we don't depend
-          # on npm's stdout format, which varies across npm versions (and
-          # redirecting stdout would store the filename text, not the gzip).
           PKGDIR=$(mktemp -d)
           npm pack --silent --pack-destination "$PKGDIR" >/dev/null 2>&1
           TARBALL=$(ls -t "$PKGDIR"/*.tgz | head -1)
@@ -218,20 +209,6 @@ jobs:
             if [[ "$MODE" != *x* ]]; then
               echo "::error::python3.12 mode '$MODE' lacks +x; build script chmod is broken."
               exit 1
-            fi
-
-            # Embedded Chromium must be +x too. linux-arm64 has no upstream
-            # arm64 build and ships none, so skip when absent.
-            if tar -tzf "$TARBALL" | grep -q "package/chromium/chrome-headless-shell$"; then
-              echo "=== embedded chromium in tarball ==="
-              tar -tvzf "$TARBALL" | grep "package/chromium/chrome-headless-shell$"
-              CMODE=$(tar -tvzf "$TARBALL" | awk '$NF == "package/chromium/chrome-headless-shell" {print $1}')
-              if [[ "$CMODE" != *x* ]]; then
-                echo "::error::chrome-headless-shell mode '$CMODE' lacks +x; install_chromium chmod is broken."
-                exit 1
-              fi
-            else
-              echo "No embedded chromium for ${{ matrix.platform }} (expected for linux-arm64)"
             fi
           fi
 

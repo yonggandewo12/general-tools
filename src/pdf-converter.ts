@@ -2,7 +2,7 @@ import puppeteer, { Browser, PDFOptions as PuppeteerPDFOptions } from 'puppeteer
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { findEmbeddedChromium } from './python-runner.js';
+import { findChromiumExecutable } from './python-runner.js';
 import { ConvertOptions, ConvertResult, ConvertImageOptions, ImageConvertResult } from './types.js';
 
 export class PdfConverter {
@@ -21,14 +21,15 @@ export class PdfConverter {
       return this.browserPromise;
     }
 
-    // Prefer the Chrome Headless Shell bundled in the runtime sub-package
-    // (same npm install, no postinstall, works offline). Falls back to
-    // Puppeteer's default cache / PATH lookup when absent.
-    const embeddedChromium = findEmbeddedChromium();
+    // Chromium is not bundled in the npm package (tarball would exceed the
+    // registry size limit). Prefer a headless shell cached by Puppeteer, then
+    // a system-installed Chrome; otherwise let Puppeteer use its own lookup
+    // and surface a fixable error below.
+    const chromiumExecutable = findChromiumExecutable();
 
     this.browserPromise = puppeteer.launch({
       headless: true,
-      ...(embeddedChromium ? { executablePath: embeddedChromium } : {}),
+      ...(chromiumExecutable ? { executablePath: chromiumExecutable } : {}),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -39,13 +40,18 @@ export class PdfConverter {
       // Puppeteer's own error for a missing binary is terse ("Could not
       // find Chrome..."); rethrow with a fixable hint.
       const msg = err instanceof Error ? err.message : String(err);
+      const installHint =
+        `Install a headless browser once (≈15s, cached across reinstalls):\n` +
+        `  npx puppeteer browsers install chrome-headless-shell\n` +
+        `Faster in China via npmmirror:\n` +
+        `  npx puppeteer browsers install chrome-headless-shell ` +
+        `--base-url https://registry.npmmirror.com/-/binary/chrome-for-testing\n` +
+        `Or just install Google Chrome and this package will use it automatically.`;
       throw new Error(
         `Failed to launch headless Chromium. ` +
-        (embeddedChromium
-          ? `Embedded Chromium at ${embeddedChromium} failed to start: ${msg}`
-          : `No Chromium found. This platform's runtime has no embedded browser ` +
-            `(linux-arm64 has no upstream build). Install one with: ` +
-            `npx puppeteer browsers install chrome-headless-shell — ${msg}`)
+        (chromiumExecutable
+          ? `Tried executable ${chromiumExecutable}: ${msg}`
+          : `No Chrome Headless Shell or system Chrome found.\n${installHint} — ${msg}`)
       );
     });
 

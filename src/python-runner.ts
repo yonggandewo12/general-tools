@@ -12,8 +12,10 @@
  */
 import { spawn, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { Browser, Cache, detectBrowserPlatform } from '@puppeteer/browsers';
 
 export interface RunOptions {
   cwd?: string;
@@ -67,20 +69,11 @@ export const SUPPORTED_PLATFORM_SUFFIXES = [
 ] as const;
 
 /**
- * Resolve the path to the embedded python binary shipped in the matching
- * `general-tools-mcp-server-runtime-<suffix>/` npm sub-package. Returns `null`
- * if the sub-package is not installed (e.g., user is on an unsupported host
- * or removed optionalDependencies).
+ * Walk up from the current file's location looking for `node_modules/<pkgName>`.
+ * Different depths cover both ESM-compiled dist/ and source-tree usage.
+ * Returns the absolute path to the package root, or `null`.
  */
-/**
- * Walk up from the current file's location looking for the matching
- * `general-tools-mcp-server-runtime-<suffix>/` npm sub-package.
- * Returns the absolute path to the sub-package root, or `null`.
- */
-function findRuntimePkgRoot(suffix: string): string | null {
-  const pkgName = `${RUNTIME_PKG_PREFIX}${suffix}`;
-  // Walk up from this file's directory looking for node_modules/<pkg>.
-  // Different depths cover both ESM-compiled dist/ and source-tree usage.
+function findSubPkgRoot(pkgName: string): string | null {
   const currentFile = fileURLToPath(import.meta.url);
   let dir = path.dirname(currentFile);
   for (let i = 0; i < 8; i++) {
@@ -93,6 +86,16 @@ function findRuntimePkgRoot(suffix: string): string | null {
     dir = parent;
   }
   return null;
+}
+
+/**
+ * Resolve the path to the embedded python binary shipped in the matching
+ * `general-tools-mcp-server-runtime-<suffix>/` npm sub-package. Returns `null`
+ * if the sub-package is not installed (e.g., user is on an unsupported host
+ * or removed optionalDependencies).
+ */
+function findRuntimePkgRoot(suffix: string): string | null {
+  return findSubPkgRoot(`${RUNTIME_PKG_PREFIX}${suffix}`);
 }
 
 export function findEmbeddedPython(): { pythonBin: string; scriptsRoot: string; pkgRoot: string } | null {
@@ -112,20 +115,77 @@ export function findEmbeddedPython(): { pythonBin: string; scriptsRoot: string; 
 }
 
 /**
- * Resolve the path to the embedded Chrome Headless Shell shipped in the
- * matching `general-tools-mcp-server-runtime-<suffix>/` npm sub-package.
- * Returns `null` when the sub-package is absent or the platform doesn't
- * ship an embedded browser (linux-arm64 — no upstream arm64 build).
+ * Locate a Chrome Headless Shell already installed in Puppeteer's cache
+ * (`~/.cache/puppeteer/`), for the current platform. Returns the executable
+ * path or `null`.
+ *
+ * Chromium is NOT bundled inside the npm sub-packages — bundling pushed the
+ * tarball past the npm registry size limit. Instead users run
+ * `npx puppeteer browsers install chrome-headless-shell` once (documented in
+ * the install-error hint and README), which caches here across reinstalls.
  */
-export function findEmbeddedChromium(): string | null {
-  const suffix = platformSuffix();
-  if (!suffix) return null;
-  const pkgRoot = findRuntimePkgRoot(suffix);
-  if (!pkgRoot) return null;
-  const isWin = process.platform === 'win32';
-  const exeName = isWin ? 'chrome-headless-shell.exe' : 'chrome-headless-shell';
-  const exe = path.join(pkgRoot, 'chromium', exeName);
-  return existsSync(exe) ? exe : null;
+export function findHeadlessShellCache(): string | null {
+  const platform = detectBrowserPlatform();
+  if (!platform) return null;
+  let cache: Cache;
+  try {
+    cache = new Cache(process.env.PUPPETEER_CACHE_DIR ?? path.join(homedir(), '.cache', 'puppeteer'));
+  } catch {
+    return null;
+  }
+  const installed = cache
+    .getInstalledBrowsers()
+    .filter(
+      (b) =>
+        b.browser === Browser.CHROMEHEADLESSSHELL && b.platform === platform,
+    )
+    .sort((a, b) => b.buildId.localeCompare(a.buildId)); // newest first
+  return installed.length > 0 ? installed[0]!.executablePath : null;
+}
+
+/** Candidate system Chrome/Chromium paths by OS. */
+const SYSTEM_CHROME_CANDIDATES = (): string[] => {
+  const p = process.platform;
+  if (p === 'darwin') {
+    return [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ];
+  }
+  if (p === 'linux') {
+    return [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+    ];
+  }
+  if (p === 'win32') {
+    const pf = process.env['PROGRAMFILES'] ?? 'C:\\Program Files';
+    const pf86 = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
+    const local = process.env['LOCALAPPDATA'] ?? '';
+    return [
+      path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      local ? path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+    ].filter(Boolean);
+  }
+  return [];
+};
+
+/**
+ * Resolve a usable Chromium executable for PDF/image rendering. Priority:
+ *   1. Chrome Headless Shell already in Puppeteer's cache
+ *   2. A system-installed Chrome/Chromium
+ * Returns `null` when neither is available.
+ */
+export function findChromiumExecutable(): string | null {
+  const cached = findHeadlessShellCache();
+  if (cached) return cached;
+  for (const c of SYSTEM_CHROME_CANDIDATES()) {
+    if (existsSync(c)) return c;
+  }
+  return null;
 }
 
 /** Per-OS install hint surfaced via MissingPythonError.installHint. */
