@@ -183,11 +183,18 @@ jobs:
       - name: Verify executable bits in tarball
         # Regression guard: python3.12 and the embedded Chromium must land in
         # the npm tarball with +x (PBS bundles python 0775 but Python 3.12's
-        # tarfile.extract() doesn't restore mode). If this fails the build
-        # script lost a chmod.
+        # tarfile.extract() doesn't restore mode). upload/download-artifact
+        # can also strip exec bits across runners, so restore them first,
+        # then confirm what will actually be published.
         shell: bash
         run: |
           cd "npm-dist/${{ matrix.platform }}"
+          # Restore exec bits lost by the artifact round-trip.
+          chmod +x python/bin/python3.12
+          EXE="chrome-headless-shell"
+          [[ "${{ matrix.platform }}" == win32-* ]] && EXE="chrome-headless-shell.exe"
+          [ -f "chromium/$EXE" ] && chmod +x "chromium/$EXE"
+
           # npm pack writes the .tgz into --pack-destination and prints the
           # filename to stdout. Resolve the file explicitly so we don't depend
           # on npm's stdout format, which varies across npm versions (and
