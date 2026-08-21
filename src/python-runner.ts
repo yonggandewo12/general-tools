@@ -72,11 +72,13 @@ export const SUPPORTED_PLATFORM_SUFFIXES = [
  * if the sub-package is not installed (e.g., user is on an unsupported host
  * or removed optionalDependencies).
  */
-export function findEmbeddedPython(): { pythonBin: string; scriptsRoot: string; pkgRoot: string } | null {
-  const suffix = platformSuffix();
-  if (!suffix) return null;
+/**
+ * Walk up from the current file's location looking for the matching
+ * `general-tools-mcp-server-runtime-<suffix>/` npm sub-package.
+ * Returns the absolute path to the sub-package root, or `null`.
+ */
+function findRuntimePkgRoot(suffix: string): string | null {
   const pkgName = `${RUNTIME_PKG_PREFIX}${suffix}`;
-
   // Walk up from this file's directory looking for node_modules/<pkg>.
   // Different depths cover both ESM-compiled dist/ and source-tree usage.
   const currentFile = fileURLToPath(import.meta.url);
@@ -84,21 +86,46 @@ export function findEmbeddedPython(): { pythonBin: string; scriptsRoot: string; 
   for (let i = 0; i < 8; i++) {
     const candidate = path.join(dir, 'node_modules', pkgName);
     if (existsSync(path.join(candidate, 'package.json'))) {
-      const isWin = process.platform === 'win32';
-      const pythonBin = isWin
-        ? path.join(candidate, 'python', 'python.exe')
-        : path.join(candidate, 'python', 'bin', 'python3.12');
-      const scriptsRoot = path.join(candidate, 'scripts', 'ppt-master', 'scripts');
-      if (existsSync(pythonBin) && existsSync(scriptsRoot)) {
-        return { pythonBin, scriptsRoot, pkgRoot: candidate };
-      }
-      return null;
+      return candidate;
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return null;
+}
+
+export function findEmbeddedPython(): { pythonBin: string; scriptsRoot: string; pkgRoot: string } | null {
+  const suffix = platformSuffix();
+  if (!suffix) return null;
+  const pkgRoot = findRuntimePkgRoot(suffix);
+  if (!pkgRoot) return null;
+  const isWin = process.platform === 'win32';
+  const pythonBin = isWin
+    ? path.join(pkgRoot, 'python', 'python.exe')
+    : path.join(pkgRoot, 'python', 'bin', 'python3.12');
+  const scriptsRoot = path.join(pkgRoot, 'scripts', 'ppt-master', 'scripts');
+  if (existsSync(pythonBin) && existsSync(scriptsRoot)) {
+    return { pythonBin, scriptsRoot, pkgRoot };
+  }
+  return null;
+}
+
+/**
+ * Resolve the path to the embedded Chrome Headless Shell shipped in the
+ * matching `general-tools-mcp-server-runtime-<suffix>/` npm sub-package.
+ * Returns `null` when the sub-package is absent or the platform doesn't
+ * ship an embedded browser (linux-arm64 — no upstream arm64 build).
+ */
+export function findEmbeddedChromium(): string | null {
+  const suffix = platformSuffix();
+  if (!suffix) return null;
+  const pkgRoot = findRuntimePkgRoot(suffix);
+  if (!pkgRoot) return null;
+  const isWin = process.platform === 'win32';
+  const exeName = isWin ? 'chrome-headless-shell.exe' : 'chrome-headless-shell';
+  const exe = path.join(pkgRoot, 'chromium', exeName);
+  return existsSync(exe) ? exe : null;
 }
 
 /** Per-OS install hint surfaced via MissingPythonError.installHint. */

@@ -76,7 +76,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Node dependencies
-        run: npm install --allow-remote=all --no-audit --no-fund
+        # --registry pins install to the Huawei Cloud mirror; CI runners
+        # ship without ~/.npmrc and would otherwise hit registry.npmjs.org.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Install Python dependencies
         run: |
@@ -123,7 +125,9 @@ jobs:
       - name: Install Node dependencies
         # The build script copies the JS deps out of node_modules into
         # npm-dist/<platform>/scripts/ for Python's PYTHONPATH.
-        run: npm install --allow-remote=all --no-audit --no-fund
+        # --registry pins install to the Huawei Cloud mirror; CI runners
+        # ship without ~/.npmrc and would otherwise hit registry.npmjs.org.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Build platform runtime
         # ~2-3 min: download PBS tarball + extract + pip install 13 packages
@@ -174,6 +178,43 @@ jobs:
           name: runtime-${{ matrix.platform }}
           path: npm-dist/${{ matrix.platform }}
 
+      - name: Verify executable bits in tarball
+        # Regression guard: python3.12 and the embedded Chromium must land in
+        # the npm tarball with +x (PBS bundles python 0775 but Python 3.12's
+        # tarfile.extract() doesn't restore mode). If this fails the build
+        # script lost a chmod.
+        shell: bash
+        run: |
+          cd "npm-dist/${{ matrix.platform }}"
+          TARBALL=$(mktemp -t runtime-XXXXXX.tgz)
+          npm pack --silent > "$TARBALL"
+
+          echo "=== python3.12 in tarball ==="
+          tar -tvzf "$TARBALL" | grep "package/python/bin/python3.12$"
+          MODE=$(tar -tvzf "$TARBALL" | awk '$NF == "package/python/bin/python3.12" {print $1}')
+          if [[ "$MODE" != *x* ]]; then
+            echo "::error::python3.12 mode '$MODE' lacks +x; build script chmod is broken."
+            exit 1
+          fi
+
+          # Embedded Chromium must be +x too. linux-arm64 has no upstream
+          # arm64 build and ships none, so skip when absent.
+          EXE="chrome-headless-shell"
+          [[ "${{ matrix.platform }}" == win32-* ]] && EXE="chrome-headless-shell.exe"
+          if tar -tzf "$TARBALL" | grep -q "package/chromium/${EXE}$"; then
+            echo "=== embedded chromium in tarball ==="
+            tar -tvzf "$TARBALL" | grep "package/chromium/${EXE}$"
+            CMODE=$(tar -tvzf "$TARBALL" | awk -v e="package/chromium/${EXE}" '$NF == e {print $1}')
+            if [[ "$CMODE" != *x* ]]; then
+              echo "::error::${EXE} mode '$CMODE' lacks +x; install_chromium chmod is broken."
+              exit 1
+            fi
+          else
+            echo "No embedded chromium for ${{ matrix.platform }} (expected for linux-arm64)"
+          fi
+
+          rm "$TARBALL"
+
       - name: Publish runtime sub-package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -190,7 +231,11 @@ jobs:
           echo "=== Publishing ${PKG}@${VERSION} ==="
           ls -la
           cat package.json
-          npm publish --access public --tag latest
+          # Pin to official registry: Huawei Cloud is a read-only mirror
+          # and rejects publishes. Required even with `registry-url` set,
+          # because that flag only configures NODE_AUTH_TOKEN — not npm's
+          # active registry.
+          npm publish --registry=https://registry.npmjs.org --access public --tag latest
 
   publish-main:
     name: Publish main package
@@ -205,7 +250,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install Node dependencies
-        run: npm install --allow-remote=all --no-audit --no-fund
+        # --registry pins install to the Huawei Cloud mirror; CI runners
+        # ship without ~/.npmrc and would otherwise hit registry.npmjs.org.
+        # Publish step below explicitly targets the official registry.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Build
         run: npm run build
@@ -239,4 +287,8 @@ jobs:
             echo "general-tools-mcp-server@${VERSION} already published — skipping"
             exit 0
           fi
-          npm publish --access public --tag latest
+          # Pin to official registry: Huawei Cloud is a read-only mirror
+          # and rejects publishes. Required even with `registry-url` set,
+          # because that flag only configures NODE_AUTH_TOKEN — not npm's
+          # active registry.
+          npm publish --registry=https://registry.npmjs.org --access public --tag latest

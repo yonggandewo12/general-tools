@@ -49,6 +49,20 @@ PLATFORM_TO_OS_CPU = {
     "win32-x64-msvc":  (["win32"],      ["x64"]),
 }
 
+# Puppeteer `browsers install` platform names (not the same as our triples).
+PLATFORM_TO_PUPPETEER = {
+    "darwin-arm64":    "mac_arm",
+    "darwin-x64":      "mac",
+    "linux-x64-gnu":   "linux",
+    "win32-x64-msvc":  "win64",
+}
+
+# Chrome for Testing / chrome-headless-shell publish x64 Linux builds only
+# (see @puppeteer/browsers chrome.js + chrome-headless-shell.js folder()).
+# On arm64 the downloaded x64 binary can't execute, so those platforms ship
+# without an embedded browser and PdfConverter falls back to system Chrome.
+CHROMIUM_UNSUPPORTED = {"linux-arm64-gnu"}
+
 PYTHON_BIN_NAME = "python.exe" if platform.system() == "Windows" else "python3.12"
 
 REQUIREMENTS_FILES = [
@@ -99,7 +113,13 @@ def download_pbs(platform_triple: str, out_dir: Path) -> Path:
 
 
 def extract_pbs(tarball: Path, out_dir: Path) -> Path:
-    """Extract PBS tarball to <out_dir>/python/. Strip the leading directory."""
+    """Extract PBS tarball to <out_dir>/python/. Strip the leading directory.
+
+    Python 3.12's tarfile.extract() does not apply member.mode to extracted
+    files (3.14 added that). PBS bundles python3.12 as mode 0775; without
+    this chmod pass, files land with default umask (0644) and the embedded
+    interpreter cannot be spawned.
+    """
     python_dir = out_dir / "python"
     if python_dir.exists():
         shutil.rmtree(python_dir)
@@ -118,6 +138,13 @@ def extract_pbs(tarball: Path, out_dir: Path) -> Path:
                 continue
             member.name = stripped_name
             tf.extract(member, python_dir)
+            # Restore the original mode. Symlinks are no-ops for chmod on
+            # POSIX (we don't follow them); on Windows islink is false.
+            target = python_dir / stripped_name
+            try:
+                os.chmod(target, member.mode & 0o7777)
+            except (OSError, NotImplementedError):
+                pass
     return python_dir
 
 
@@ -155,6 +182,156 @@ def install_pip_deps(python_dir: Path, out_dir: Path) -> None:
         ], check=False)  # some packages (like pandoc fallbacks) may not be on PyPI
 
 
+def install_chromium(out_dir: Path, platform_triple: str) -> None:
+    """Download Puppeteer's pinned Chrome Headless Shell and stage it flat
+    under <out_dir>/chromium/.
+
+    PDF conversion needs a headless browser; shipping it inside the runtime
+    sub-package (like the embedded Python) makes convert_to_pdf work on a
+    fresh machine with no network access and no puppeteer postinstall.
+
+    Chrome for Testing publishes x64 Linux only, so linux-arm64 skips and
+    PdfConverter falls back to the system Chrome (or a manually installed
+    headless shell).
+    """
+    if platform_triple in CHROMIUM_UNSUPPORTED:
+        log(f"Skipping chromium for {platform_triple} (no upstream linux-arm64 build)")
+        return
+
+    puppeteer_platform = PLATFORM_TO_PUPPETEER[platform_triple]
+    chromium_dir = out_dir / "chromium"
+    if chromium_dir.exists():
+        shutil.rmtree(chromium_dir)
+    chromium_dir.mkdir(parents=True)
+
+    log(f"puppeteer browsers install chrome-headless-shell --platform {puppeteer_platform}")
+    # --no-install forces npx to use the local puppeteer (same pinned revision
+    # as the main package) instead of fetching a latest from the registry.
+    # Resolve npx via shutil.which: on Windows the executable is `npx.cmd`,
+    # which subprocess can run directly with the full path (no shell=True).
+    npx = shutil.which("npx")
+    if not npx:
+        raise SystemExit("npx not found on PATH (Node.js >= 18 is required)")
+    proc = subprocess.run(
+        [npx, "--no-install", "puppeteer", "browsers", "install",
+         "chrome-headless-shell", "--platform", puppeteer_platform],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"Failed to install chrome-headless-shell for {platform_triple}: "
+            f"{proc.stderr.strip() or proc.stdout.strip()}"
+        )
+
+    # Output ends with "<browser>@<buildId> <path>". Skip npm's own notices
+    # and any trailing blank lines.
+    lines = [
+        l for l in proc.stdout.splitlines()
+        if l.strip() and not l.startswith("npm notice")
+    ]
+    if not lines:
+        raise SystemExit(f"Unexpected puppeteer install output: {proc.stdout!r}")
+    exe_path = Path(lines[-1].rsplit(" ", 1)[-1].strip())
+    if not exe_path.is_file() or not exe_path.name.startswith("chrome-headless-shell"):
+        raise SystemExit(f"puppeteer reported unexpected executable: {exe_path}")
+
+    # Flatten the browser dir into chromium/ so the binary and its
+    # .pak/.dylib assets stay together under a stable layout.
+    for item in exe_path.parent.iterdir():
+        dest = chromium_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest)
+        else:
+            shutil.copy2(item, dest)
+    os.chmod(chromium_dir / exe_path.name, 0o755)
+    log(f"staged chrome-headless-shell in {chromium_dir}")
+
+
+def rewrite_pip_wrappers(python_dir: Path) -> None:
+    """Rewrite pip-installed entry-point scripts to use a PBS-style sh wrapper.
+
+    pip writes `#!<build-machine absolute path>/python3.12` into every entry
+    point it creates in `<python>/bin/` (because `sys.executable` is the
+    absolute path it was invoked from). On the user's machine that path
+    doesn't exist, so the wrapper can't run.
+
+    The fix replaces the first line with `#!/bin/sh` + an `exec` that resolves
+    the python binary relative to the script's own location. Same pattern
+    PBS uses for its bundled 2to3/pip/pip3/idle3/pydoc3 wrappers.
+
+    On Windows, pip installs entry points as .exe launchers rather than text
+    scripts, so this pass is a no-op there. That's expected: the runtime never
+    invokes those launchers — it spawns python.exe directly — so their
+    build-machine shebang is harmless.
+    """
+    bin_dir = python_dir / "bin"
+    if not bin_dir.exists():
+        # Windows layout: no bin/ subdir, scripts go in python/ itself.
+        bin_dir = python_dir
+
+    target = PYTHON_BIN_NAME  # "python3.12" on POSIX, "python.exe" on Windows
+
+    rewritten = 0
+    for f in sorted(bin_dir.iterdir()):
+        if not f.is_file() or f.is_symlink():
+            continue
+        # Skip large binaries (python.exe / python312.dll on Windows): the
+        # `#!` prefix check would skip them anyway, but reading ~18MB into
+        # memory just to fail the prefix test is wasteful.
+        if f.stat().st_size > 1_000_000:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not content.startswith("#!"):
+            continue
+        first_line, _, rest = content.partition("\n")
+        # Already a portable sh wrapper (PBS-bundled: 2to3/pip/pip3/idle3/pydoc3).
+        if first_line == "#!/bin/sh":
+            continue
+        # Skip shebangs that don't reference an absolute python path —
+        # they're already portable (e.g. #!/usr/bin/env python3).
+        if "/python" not in first_line and "python.exe" not in first_line:
+            continue
+
+        new_content = (
+            "#!/bin/sh\n"
+            "'''exec' \"$(dirname -- \"$(realpath -- \"$0\")\")/"
+            f"{target}\" \"$0\" \"$@\"\n"
+            "' '''\n"
+            f"{rest}"
+        )
+        f.write_text(new_content)
+        rewritten += 1
+    if rewritten:
+        log(f"rewrote shebang of {rewritten} pip entry-point script(s)")
+
+
+def chmod_bin_executables(python_dir: Path) -> None:
+    """Ensure every file under python/bin/ has +x for owner, group, other.
+
+    Belt-and-suspenders after extract_pbs's per-member chmod: pip writes
+    entry-point scripts with default umask (typically 0644). Without this
+    pass the wrappers would still be unrunnable on the user's machine even
+    after their shebang was rewritten.
+    """
+    bin_dir = python_dir / "bin"
+    if not bin_dir.exists():
+        bin_dir = python_dir
+
+    fixed = 0
+    for f in bin_dir.iterdir():
+        if not f.is_file() or f.is_symlink():
+            continue
+        mode = f.stat().st_mode
+        if not (mode & 0o111):  # no exec bit at all
+            os.chmod(f, mode | 0o755)
+            fixed += 1
+    if fixed:
+        log(f"chmod +x on {fixed} script(s) in python/bin/")
+
+
 def copy_scripts(out_dir: Path) -> None:
     """Copy scripts/ppt-master/ and scripts/excel/ to <out_dir>/scripts/."""
     target = out_dir / "scripts"
@@ -179,7 +356,7 @@ def write_package_json(platform_triple: str, version: str, out_dir: Path) -> Non
         "version": version,
         "description": PACKAGE_DESCRIPTION,
         "main": "python/index.js",
-        "files": ["python/", "scripts/"],
+        "files": ["python/", "scripts/", "chromium/"],
         "os": os_values,
         "cpu": cpu_values,
         "engines": {"node": ">=18"},
@@ -238,8 +415,17 @@ def main() -> int:
         # Step 3: pip install deps
         install_pip_deps(python_dir, out_dir)
 
+        # Step 3.5: fix pip wrappers (shebang + +x). Must run before smoke_test
+        # because smoke_test only invokes python3.12 directly, but a downstream
+        # npm install will try to run the pip-installed entry points too.
+        rewrite_pip_wrappers(python_dir)
+        chmod_bin_executables(python_dir)
+
         # Step 4: copy Python scripts (preserving directory layout)
         copy_scripts(out_dir)
+
+        # Step 4.5: stage embedded Chrome Headless Shell for PDF conversion
+        install_chromium(out_dir, args.platform)
 
         # Step 5: write platform sub-package.json
         write_package_json(args.platform, args.version, out_dir)

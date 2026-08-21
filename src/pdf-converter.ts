@@ -2,6 +2,7 @@ import puppeteer, { Browser, PDFOptions as PuppeteerPDFOptions } from 'puppeteer
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
+import { findEmbeddedChromium } from './python-runner.js';
 import { ConvertOptions, ConvertResult, ConvertImageOptions, ImageConvertResult } from './types.js';
 
 export class PdfConverter {
@@ -20,14 +21,32 @@ export class PdfConverter {
       return this.browserPromise;
     }
 
+    // Prefer the Chrome Headless Shell bundled in the runtime sub-package
+    // (same npm install, no postinstall, works offline). Falls back to
+    // Puppeteer's default cache / PATH lookup when absent.
+    const embeddedChromium = findEmbeddedChromium();
+
     this.browserPromise = puppeteer.launch({
       headless: true,
+      ...(embeddedChromium ? { executablePath: embeddedChromium } : {}),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu'
       ]
+    }).catch((err: unknown) => {
+      // Puppeteer's own error for a missing binary is terse ("Could not
+      // find Chrome..."); rethrow with a fixable hint.
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to launch headless Chromium. ` +
+        (embeddedChromium
+          ? `Embedded Chromium at ${embeddedChromium} failed to start: ${msg}`
+          : `No Chromium found. This platform's runtime has no embedded browser ` +
+            `(linux-arm64 has no upstream build). Install one with: ` +
+            `npx puppeteer browsers install chrome-headless-shell — ${msg}`)
+      );
     });
 
     try {

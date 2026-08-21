@@ -38,7 +38,10 @@ jobs:
         # @firecrawl/anydoc + @firecrawl/pdf-inspector prebuilt binaries are
         # distributed via remote URLs; npm blocks them by default on this
         # runner. --allow-remote=all whitelists them for one install.
-        run: npm install --allow-remote=all --no-audit --no-fund
+        # --registry pins the install source to the Huawei Cloud mirror;
+        # CI runners ship without a user ~/.npmrc and would otherwise hit
+        # registry.npmjs.org directly (slower + more rate-limited).
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Install Python dependencies
         # Backward-compat path: verify that system Python + manual
@@ -88,7 +91,9 @@ jobs:
           node-version: '22'
 
       - name: Install Node dependencies
-        run: npm install --allow-remote=all --no-audit --no-fund
+        # --registry pins install to the Huawei Cloud mirror; CI runners
+        # ship without ~/.npmrc and would otherwise hit registry.npmjs.org.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Resolve embedded python binary
         id: resolve
