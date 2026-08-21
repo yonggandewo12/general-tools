@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { MdToPdfOptions, ConvertMdResult, MdConvertStats } from './types.js';
+import { MdToPdfOptions, ConvertMdResult, MdConvertStats, PAPER_FORMAT_DIMENSIONS } from './types.js';
 import { PdfConverter } from './pdf-converter.js';
 import markdownit from 'markdown-it';
 import anchor from 'markdown-it-anchor';
@@ -13,15 +13,6 @@ const TOC_HEADING_RE = /^\s{0,3}#{2,6}\s+(?:目录|目錄|contents?|table of con
 const TOC_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]+\]\(#[^)]+\)\s*$/;
 const HR_RE = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-
-// Paper format dimensions in CSS pixels (96 DPI) — must match pdf-converter.ts
-const FORMAT_DIMS: Record<string, { w: number; h: number }> = {
-  A4: { w: 794, h: 1123 },
-  A3: { w: 1123, h: 1587 },
-  Letter: { w: 816, h: 1055 },
-  Legal: { w: 816, h: 1346 },
-  Tabloid: { w: 1055, h: 1633 },
-};
 
 /** Parse a CSS length string (mm/cm/in/pt/px) to CSS pixels. */
 function parseCssLen(val: string | undefined, def: string): number {
@@ -667,9 +658,9 @@ export class MdConverter {
     let pdfContentW: number | undefined;
     let pdfContentH: number | undefined;
     if (mermaidSource !== 'none') {
-      const dims = FORMAT_DIMS[options.format || 'A4'] || FORMAT_DIMS.A4!;
-      const pw = options.landscape ? dims.h : dims.w;
-      const ph = options.landscape ? dims.w : dims.h;
+      const dims = PAPER_FORMAT_DIMENSIONS[options.format || 'A4'] || PAPER_FORMAT_DIMENSIONS.A4!;
+      const pw = options.landscape ? dims.height : dims.width;
+      const ph = options.landscape ? dims.width : dims.height;
       const mt = parseCssLen(options.marginTop, '10mm');
       const mb = parseCssLen(options.marginBottom, '10mm');
       const ml = parseCssLen(options.marginLeft, '10mm');

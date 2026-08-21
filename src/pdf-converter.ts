@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { findChromiumExecutable } from './python-runner.js';
-import { ConvertOptions, ConvertResult, ConvertImageOptions, ImageConvertResult } from './types.js';
+import { ConvertOptions, ConvertResult, ConvertImageOptions, ImageConvertResult, PAPER_FORMAT_DIMENSIONS } from './types.js';
 
 export class PdfConverter {
   private browser: Browser | null = null;
@@ -83,15 +83,8 @@ export class PdfConverter {
       // Set viewport to match paper format for correct Mermaid scaling
       // scaleMermaidDiagrams() uses document.documentElement.clientHeight
       // which must reflect the PDF page height, not the default 600px viewport
-      const FORMAT_DIMENSIONS: Record<string, { width: number; height: number }> = {
-        A4: { width: 794, height: 1123 },
-        A3: { width: 1123, height: 1587 },
-        Letter: { width: 816, height: 1055 },
-        Legal: { width: 816, height: 1346 },
-        Tabloid: { width: 1055, height: 1633 },
-      };
       const fmt = options.format || 'A4';
-      const dims = FORMAT_DIMENSIONS[fmt] || FORMAT_DIMENSIONS.A4!;
+      const dims = PAPER_FORMAT_DIMENSIONS[fmt] || PAPER_FORMAT_DIMENSIONS.A4!;
       await page.setViewport(
         options.landscape
           ? { width: dims.height, height: dims.width }
@@ -173,6 +166,10 @@ export class PdfConverter {
       } else {
         outputPath = path.resolve(outputPath);
       }
+
+      // Ensure parent directory exists (mirrors convertToImage)
+      const parentDir = path.dirname(outputPath);
+      await fs.mkdir(parentDir, { recursive: true }).catch(() => {});
 
       // Generate PDF
       if (outputPath) {

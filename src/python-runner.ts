@@ -290,6 +290,7 @@ export class PythonScriptRunner {
   readonly pythonExecutable: string;
   readonly scriptsRoot: string;
   readonly embeddedPkgRoot: string | undefined;
+  private packageCache = new Map<string, string[]>();
 
   constructor(pythonExecutable?: string, scriptsRootOverride?: string) {
     this.pythonExecutable = pythonExecutable ?? findPython();
@@ -349,6 +350,11 @@ export class PythonScriptRunner {
   }
 
   async checkPackages(packages: string[]): Promise<string[]> {
+    // Cache per package-list: a process's Python environment is stable, so
+    // re-spawning `python -c "import X"` for every call (e.g. each
+    // convert_to_markdown) wastes ~7 subprocess spawns per invocation.
+    const key = [...packages].sort().join(',');
+    if (this.packageCache.has(key)) return this.packageCache.get(key)!;
     const missing: string[] = [];
     for (const pkg of packages) {
       try {
@@ -358,6 +364,7 @@ export class PythonScriptRunner {
         missing.push(pkg);
       }
     }
+    this.packageCache.set(key, missing);
     return missing;
   }
 

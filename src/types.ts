@@ -377,3 +377,15 @@ export interface ConvertToMarkdownResult {
     assetCount?: number;
   };
 }
+
+/**
+ * Paper format dimensions in CSS pixels (96 DPI), shared by the Markdown →
+ * HTML and HTML → PDF/image renderers so viewport scaling stays in sync.
+ */
+export const PAPER_FORMAT_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  A4: { width: 794, height: 1123 },
+  A3: { width: 1123, height: 1587 },
+  Letter: { width: 816, height: 1055 },
+  Legal: { width: 816, height: 1346 },
+  Tabloid: { width: 1055, height: 1633 },
+};

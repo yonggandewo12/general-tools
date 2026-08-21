@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -19,12 +20,39 @@ import { PptMasterService } from './ppt-master-service.js';
 import { ExcelService } from './excel-service.js';
 import { EXCEL_TOOLS, EXCEL_ACTION_MAP } from './excel-tools.js';
 
+/**
+ * Read the package version once at startup so the MCP server advertises the
+ * real release instead of a stale hardcoded literal. Falls back gracefully.
+ */
+function readPackageVersion(): string {
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.join(dir, '..', 'package.json');
+    return JSON.parse(readFileSync(pkgPath, 'utf-8')).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const converter = new PdfConverter();
 const mdConverter = new MdConverter();
 const ocrService = new OcrService();
 const pdfExtractor = new PdfExtractor();
-const pptMasterService = new PptMasterService();
-const excelService = new ExcelService();
+
+// PptMasterService / ExcelService construct their PythonScriptRunner
+// eagerly, which probes the interpreter synchronously and throws when no
+// Python 3.10+ is available (e.g. a fresh machine before the runtime
+// sub-package installs, or --omit=optional). Lazy-create them so the MCP
+// server can still start and list tools; the failure surfaces only when a
+// Python-backed tool is actually invoked.
+let pptService: PptMasterService | null = null;
+function getPptService(): PptMasterService {
+  return (pptService ??= new PptMasterService());
+}
+let excelSvc: ExcelService | null = null;
+function getExcelService(): ExcelService {
+  return (excelSvc ??= new ExcelService());
+}
 
 const CONVERT_HTML_TO_PDF_TOOL: Tool = {
   name: 'convert_html_to_pdf',
@@ -592,7 +620,7 @@ class Md2PdfServer {
     this.server = new Server(
       {
         name: 'general-tools-mcp-server',
-        version: '1.0.0',
+        version: readPackageVersion(),
       },
       {
         capabilities: {
@@ -1044,7 +1072,7 @@ class Md2PdfServer {
       if (name === 'generate_presentation') {
         try {
           const options = args as GeneratePresentationOptions;
-          const result = await pptMasterService.generatePresentation(options);
+          const result = await getPptService().generatePresentation(options);
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,
@@ -1060,7 +1088,7 @@ class Md2PdfServer {
       if (name === 'generate_image') {
         try {
           const options = args as unknown as GenerateImageOptions;
-          const result = await pptMasterService.generateImage(options);
+          const result = await getPptService().generateImage(options);
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,
@@ -1076,7 +1104,7 @@ class Md2PdfServer {
       if (name === 'convert_to_markdown') {
         try {
           const options = args as unknown as ConvertToMarkdownOptions;
-          const result = await pptMasterService.convertToMarkdown(options);
+          const result = await getPptService().convertToMarkdown(options);
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,
@@ -1092,7 +1120,7 @@ class Md2PdfServer {
       const excelAction = EXCEL_ACTION_MAP[name];
       if (excelAction) {
         try {
-          const result = await excelService.call(excelAction, (args as Record<string, unknown>) ?? {});
+          const result = await getExcelService().call(excelAction, (args as Record<string, unknown>) ?? {});
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             isError: !result.success,
