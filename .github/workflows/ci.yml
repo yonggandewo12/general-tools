@@ -41,7 +41,10 @@ jobs:
         # --registry pins the install source to the Huawei Cloud mirror;
         # CI runners ship without a user ~/.npmrc and would otherwise hit
         # registry.npmjs.org directly (slower + more rate-limited).
-        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
+        # --omit=optional: this job tests the main package; the runtime
+        # sub-packages are exercised by the test-embedded-runtime job and
+        # may not be published yet when CI runs on a fresh bump.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --omit=optional --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Install Python dependencies
         # Backward-compat path: verify that system Python + manual

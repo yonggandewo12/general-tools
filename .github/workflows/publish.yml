@@ -78,7 +78,10 @@ jobs:
       - name: Install Node dependencies
         # --registry pins install to the Huawei Cloud mirror; CI runners
         # ship without ~/.npmrc and would otherwise hit registry.npmjs.org.
-        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
+        # --omit=optional: this job tests the main package; the runtime
+        # sub-packages are built by build-platforms and published by
+        # publish-platforms, so they may not exist in the registry yet.
+        run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --omit=optional --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Install Python dependencies
         run: |
