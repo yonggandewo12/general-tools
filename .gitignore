@@ -18,3 +18,4 @@ scripts/excel/.venv/
 /.codeartsdoer/
 package-lock.json
 /doc-ops-mcp/
+/test.md

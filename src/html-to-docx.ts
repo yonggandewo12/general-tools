@@ -223,6 +223,11 @@ export class HtmlToDocxConverter {
       return [this.createSimpleTextRun(element.text, baseStyle)];
     }
     const sanitizedHtml = this.sanitizeHtml(html);
+    // 无标签的纯文本不交给 cheerio：`$(string)` 会把无 `<` 的字符串当 CSS 选择器解析，
+    // 含 `/` 等非法选择器语法的文本（如 "macOS / Linux"）会抛 Unmatched selector。
+    if (!sanitizedHtml.includes('<')) {
+      return [this.createSimpleTextRun(element.text, baseStyle)];
+    }
     const $content = $(sanitizedHtml);
     if ($content.length === 0) {
       return [this.createSimpleTextRun(element.text, baseStyle)];

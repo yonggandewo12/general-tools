@@ -56,16 +56,16 @@ export const DOCX_TOOLS: Tool[] = [
   },
   {
     name: 'docx_convert_md_to_docx',
-    description: 'Convert Markdown content to a .docx Word document. Renders markdown to styled HTML then to DOCX.',
+    description: 'Convert Markdown file or content to a .docx Word document. Renders markdown to styled HTML then to DOCX.',
     inputSchema: {
       type: 'object',
       properties: {
+        mdPath: { type: 'string', description: 'Path to Markdown file (absolute or relative to cwd)' },
         mdContent: { type: 'string', description: 'Markdown content string' },
         outputPath: outputPathProp,
         title: { type: 'string', description: 'Document title (default: document)' },
         embedImages: { type: 'boolean', description: 'Embed local images as base64 (default: true)' },
       },
-      required: ['mdContent'],
     },
   },
   {

@@ -1159,9 +1159,31 @@ class Md2PdfServer {
               case 'create_document':
                 result = await svc.createDocument(argsObj.content as string, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined });
                 break;
-              case 'convert_md_to_docx':
-                result = await svc.convertMdToDocx(argsObj.mdContent as string, undefined, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined, embedImages: argsObj.embedImages as boolean | undefined });
+              case 'convert_md_to_docx': {
+                const mdPathArg = argsObj.mdPath as string | undefined;
+                const mdContentArg = argsObj.mdContent as string | undefined;
+                if (!mdPathArg && !mdContentArg) {
+                  throw new Error('Either mdPath or mdContent must be provided');
+                }
+                let mdText: string;
+                let baseDir: string | undefined;
+                if (mdPathArg) {
+                  const mdFilePath = path.resolve(mdPathArg);
+                  await fs.access(mdFilePath);
+                  mdText = await fs.readFile(mdFilePath, 'utf-8');
+                  baseDir = path.dirname(mdFilePath);
+                } else {
+                  mdText = mdContentArg as string;
+                  baseDir = undefined;
+                }
+                let docxOutputPath = argsObj.outputPath as string | undefined;
+                if (!docxOutputPath && mdPathArg) {
+                  const parsed = path.parse(mdPathArg);
+                  docxOutputPath = path.join(parsed.dir, `${parsed.name}.docx`);
+                }
+                result = await svc.convertMdToDocx(mdText, baseDir, docxOutputPath, { title: argsObj.title as string | undefined, embedImages: argsObj.embedImages as boolean | undefined });
                 break;
+              }
               case 'convert_html_to_docx':
                 result = await svc.convertHtmlToDocx(argsObj.htmlContent as string, argsObj.outputPath as string | undefined);
                 break;
