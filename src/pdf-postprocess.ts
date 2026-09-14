@@ -161,7 +161,18 @@ async function drawTextWatermark(
   const angle = -30;
   const spacingX = fontSize * 8;
   const spacingY = fontSize * 7;
-  const textWidth = watermarkText.length * fontSize * 0.6;
+  // 用嵌入字体精确测量文本宽度；无法测量时按字符宽度近似：
+  // CJK 全角 ≈ fontSize，其余 ≈ 0.6 × fontSize
+  let textWidth: number;
+  try {
+    textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
+  } catch {
+    let units = 0;
+    for (const ch of watermarkText) {
+      units += ch.charCodeAt(0) > 0xff ? 1 : 0.6;
+    }
+    textWidth = units * fontSize;
+  }
   const textHeight = fontSize;
   const radians = (angle * Math.PI) / 180;
   const cos = Math.abs(Math.cos(radians));

@@ -584,6 +584,67 @@ const CONVERT_TO_MARKDOWN_TOOL: Tool = {
   }
 };
 
+type ToolResponse = {
+  content: { type: 'text'; text: string }[];
+  isError?: boolean;
+};
+
+/** 统一错误响应：所有工具的 catch 分支共享同一格式。 */
+function toolError(error: unknown): ToolResponse {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : String(error)
+        }, null, 2)
+      }
+    ],
+    isError: true
+  };
+}
+
+/**
+ * 通用工具调用包装：执行 fn 并把结果整体序列化为 JSON 返回；
+ * `isOk` 判定失败时标记 isError，抛错走 toolError。
+ * 默认按 `result.success === true` 判定。
+ */
+async function callTool(
+  fn: () => Promise<unknown>,
+  isOk: (result: unknown) => boolean = (r) =>
+    (r as { success?: boolean } | null | undefined)?.success === true,
+): Promise<ToolResponse> {
+  try {
+    const result = await fn();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      isError: !isOk(result),
+    };
+  } catch (error) {
+    return toolError(error);
+  }
+}
+
+/**
+ * 读取 Markdown 源：mdPath（本地文件，返回其所在目录供相对资源解析）
+ * 或 mdContent（原始字符串）。两者都缺时抛错。
+ */
+async function readMarkdownSource(
+  mdPath?: string,
+  mdContent?: string,
+): Promise<{ mdText: string; baseDir: string | undefined }> {
+  if (!mdPath && !mdContent) {
+    throw new Error('Either mdPath or mdContent must be provided');
+  }
+  if (mdPath) {
+    const mdFilePath = path.resolve(mdPath);
+    await fs.access(mdFilePath);
+    return { mdText: await fs.readFile(mdFilePath, 'utf-8'), baseDir: path.dirname(mdFilePath) };
+  }
+  return { mdText: mdContent!, baseDir: undefined };
+}
+
 class Md2PdfServer {
   private server: Server;
 
@@ -631,116 +692,52 @@ class Md2PdfServer {
       const { name, arguments: args } = request.params;
 
       if (name === 'convert_html_to_pdf') {
-        try {
-          const options = args as ConvertOptions;
-          const result = await converter.convertToPdf(options);
-
-          if (result.success) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: true,
-                    message: 'PDF generated successfully',
-                    outputPath: result.outputPath,
-                    processingTime: `${result.details?.processingTime}ms`,
-                    fileSize: result.details?.fileSize
-                      ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
-                      : 'unknown'
-                  }, null, 2)
-                }
-              ]
-            };
-          } else {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: false,
-                    error: result.error,
-                    processingTime: `${result.details?.processingTime}ms`
-                  }, null, 2)
-                }
-              ],
-              isError: true
-            };
-          }
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
+        return callTool(async () => {
+          const result = await converter.convertToPdf(args as ConvertOptions);
+          return result.success
+            ? {
+                success: true,
+                message: 'PDF generated successfully',
+                outputPath: result.outputPath,
+                processingTime: `${result.details?.processingTime}ms`,
+                fileSize: result.details?.fileSize
+                  ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
+                  : 'unknown',
               }
-            ],
-            isError: true
-          };
-        }
+            : {
+                success: false,
+                error: result.error,
+                processingTime: `${result.details?.processingTime}ms`,
+              };
+        }, (r) => (r as { success: boolean }).success);
       }
 
       if (name === 'convert_html_to_image') {
-        try {
-          const options = args as ConvertImageOptions;
-          const result = await converter.convertToImage(options);
-
-          if (result.success) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: true,
-                    message: 'Image generated successfully',
-                    outputPath: result.outputPath,
-                    processingTime: `${result.details?.processingTime}ms`,
-                    fileSize: result.details?.fileSize
-                      ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
-                      : 'unknown',
-                    dimensions: result.details?.width && result.details?.height
-                      ? `${result.details.width} × ${result.details.height}px`
-                      : 'unknown'
-                  }, null, 2)
-                }
-              ]
-            };
-          } else {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: false,
-                    error: result.error,
-                    processingTime: `${result.details?.processingTime}ms`
-                  }, null, 2)
-                }
-              ],
-              isError: true
-            };
-          }
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
+        return callTool(async () => {
+          const result = await converter.convertToImage(args as ConvertImageOptions);
+          return result.success
+            ? {
+                success: true,
+                message: 'Image generated successfully',
+                outputPath: result.outputPath,
+                processingTime: `${result.details?.processingTime}ms`,
+                fileSize: result.details?.fileSize
+                  ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
+                  : 'unknown',
+                dimensions: result.details?.width && result.details?.height
+                  ? `${result.details.width} × ${result.details.height}px`
+                  : 'unknown',
               }
-            ],
-            isError: true
-          };
-        }
+            : {
+                success: false,
+                error: result.error,
+                processingTime: `${result.details?.processingTime}ms`,
+              };
+        }, (r) => (r as { success: boolean }).success);
       }
 
       if (name === 'convert_md_to_html') {
-        try {
+        return callTool(async () => {
           const {
             mdPath: mdPathArg,
             mdContent,
@@ -752,22 +749,10 @@ class Md2PdfServer {
             mermaidSource,
           } = args as Record<string, unknown>;
 
-          if (!mdPathArg && !mdContent) {
-            throw new Error('Either mdPath or mdContent must be provided');
-          }
-
-          let mdText: string;
-          let baseDir: string | undefined;
-
-          if (mdPathArg) {
-            const mdFilePath = path.resolve(mdPathArg as string);
-            await fs.access(mdFilePath);
-            mdText = await fs.readFile(mdFilePath, 'utf-8');
-            baseDir = path.dirname(mdFilePath);
-          } else {
-            mdText = mdContent as string;
-            baseDir = undefined;
-          }
+          const { mdText, baseDir } = await readMarkdownSource(
+            mdPathArg as string | undefined,
+            mdContent as string | undefined,
+          );
 
           const { html, stats } = await mdConverter.convertMdToHtml(mdText, {
             embedImages: embedImages as boolean | undefined,
@@ -793,121 +778,59 @@ class Md2PdfServer {
           await fs.writeFile(htmlOutputPath, html, 'utf-8');
 
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  message: 'Markdown converted to HTML successfully',
-                  outputPath: htmlOutputPath,
-                  stats,
-                }, null, 2)
-              }
-            ]
+            success: true,
+            message: 'Markdown converted to HTML successfully',
+            outputPath: htmlOutputPath,
+            stats,
           };
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
-              }
-            ],
-            isError: true
-          };
-        }
+        });
       }
 
       if (name === 'convert_md_to_pdf') {
-        try {
-          const options = args as MdToPdfOptions;
-          const result = await mdConverter.convertMdToPdf(options, converter);
-
-          if (result.success) {
-            const response: Record<string, unknown> = {
-              success: true,
-              message: 'Markdown converted to PDF successfully',
-              outputPath: result.outputPath,
+        return callTool(async () => {
+          const result = await mdConverter.convertMdToPdf(args as MdToPdfOptions, converter);
+          if (!result.success) {
+            return {
+              success: false,
+              error: result.error,
               processingTime: `${result.details?.processingTime}ms`,
-              fileSize: result.details?.fileSize
-                ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
-                : 'unknown',
-            };
-            if (result.details?.stats) {
-              response.stats = result.details.stats;
-            }
-            if (result.details?.pageCount !== undefined) {
-              response.pageCount = result.details.pageCount;
-            }
-            if (result.details?.pageSize) {
-              response.pageSize = `${result.details.pageSize.width}x${result.details.pageSize.height}pt`;
-            }
-            if (result.details?.blankPages && result.details.blankPages.length > 0) {
-              response.blankPages = result.details.blankPages;
-            }
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(response, null, 2)
-                }
-              ]
-            };
-          } else {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: false,
-                    error: result.error,
-                    processingTime: `${result.details?.processingTime}ms`
-                  }, null, 2)
-                }
-              ],
-              isError: true
             };
           }
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
-              }
-            ],
-            isError: true
+          const response: Record<string, unknown> = {
+            success: true,
+            message: 'Markdown converted to PDF successfully',
+            outputPath: result.outputPath,
+            processingTime: `${result.details?.processingTime}ms`,
+            fileSize: result.details?.fileSize
+              ? `${(result.details.fileSize / 1024).toFixed(2)} KB`
+              : 'unknown',
           };
-        }
+          if (result.details?.stats) {
+            response.stats = result.details.stats;
+          }
+          if (result.details?.pageCount !== undefined) {
+            response.pageCount = result.details.pageCount;
+          }
+          if (result.details?.pageSize) {
+            response.pageSize = `${result.details.pageSize.width}x${result.details.pageSize.height}pt`;
+          }
+          if (result.details?.blankPages && result.details.blankPages.length > 0) {
+            response.blankPages = result.details.blankPages;
+          }
+          return response;
+        });
       }
 
       if (name === 'pdf_fill_form') {
-        try {
-          const result = await fillPdfForm(args as unknown as Parameters<typeof fillPdfForm>[0]);
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => fillPdfForm(args as unknown as Parameters<typeof fillPdfForm>[0]));
       }
 
       if (name === 'md_to_epub') {
-        try {
+        return callTool(async () => {
           const { mdPath, mdContent, outputPath, title, author, publisher, cover, splitByHeading, embedImages, version } = args as Record<string, unknown>;
           if (!mdPath && !mdContent) throw new Error('Either mdPath or mdContent must be provided');
           if (!outputPath) throw new Error('outputPath is required');
-          const result = await mdToEpub({
+          return mdToEpub({
             mdPath: mdPath as string | undefined,
             mdContent: mdContent as string | undefined,
             outputPath: outputPath as string,
@@ -919,453 +842,191 @@ class Md2PdfServer {
             embedImages: embedImages as boolean | undefined,
             version: version as number | undefined,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        });
       }
 
       if (name === 'qrcode_generate') {
-        try {
-          const result = await generateQrcode(args as unknown as Parameters<typeof generateQrcode>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => generateQrcode(args as unknown as Parameters<typeof generateQrcode>[0]));
       }
 
       if (name === 'archive_compress') {
-        try {
-          const result = await compressArchive(args as unknown as Parameters<typeof compressArchive>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => compressArchive(args as unknown as Parameters<typeof compressArchive>[0]));
       }
 
       if (name === 'archive_extract') {
-        try {
-          const result = await extractArchive(args as unknown as Parameters<typeof extractArchive>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => extractArchive(args as unknown as Parameters<typeof extractArchive>[0]));
       }
 
       if (name === 'sqlite_query') {
-        try {
-          const result = await sqliteQuery(args as unknown as Parameters<typeof sqliteQuery>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => sqliteQuery(args as unknown as Parameters<typeof sqliteQuery>[0]));
       }
 
       if (name === 'sqlite_exec') {
-        try {
-          const result = await sqliteExec(args as unknown as Parameters<typeof sqliteExec>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => sqliteExec(args as unknown as Parameters<typeof sqliteExec>[0]));
       }
 
       if (name === 'sqlite_tables') {
-        try {
+        return callTool(async () => {
           const { dbPath } = args as unknown as { dbPath: string };
-          const result = await sqliteTables(dbPath);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+          return sqliteTables(dbPath);
+        });
       }
 
       if (name === 'formula_ocr') {
-        try {
-          const result = await recognizeFormula(args as unknown as Parameters<typeof recognizeFormula>[0]);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: !result.success };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => recognizeFormula(args as unknown as Parameters<typeof recognizeFormula>[0]));
       }
 
       if (name === 'recognize_text') {
-        try {
-          const options = args as unknown as OcrOptions;
-          const result = await ocrService.recognize(options);
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
-              }
-            ],
-            isError: true
-          };
-        }
+        return callTool(() => ocrService.recognize(args as unknown as OcrOptions));
       }
 
       if (name === 'classify_pdf') {
-        try {
+        return callTool(async () => {
           const options = args as unknown as { pdfPath: string };
           const result = await classifyPdf(options.pdfPath);
           // service 层 pagesNeedingOcr 为 0-indexed，对外统一 1-indexed
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                pdfType: result.pdfType,
-                pageCount: result.pageCount,
-                confidence: result.confidence,
-                pagesNeedingOcr: result.pagesNeedingOcr.map((p) => p + 1),
-              }, null, 2),
-            }],
+            success: true,
+            pdfType: result.pdfType,
+            pageCount: result.pageCount,
+            confidence: result.confidence,
+            pagesNeedingOcr: result.pagesNeedingOcr.map((p) => p + 1),
           };
-        } catch (error) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: false,
-                error: error instanceof Error ? error.message : String(error),
-              }, null, 2),
-            }],
-            isError: true,
-          };
-        }
+        });
       }
 
       if (name === 'extract_pdf_text') {
-        try {
-          const options = args as unknown as PdfExtractOptions;
-          const result = await extractPdf(options);
-
-          if (result.success) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: true,
-                    text: result.text,
-                    pageCount: result.pageCount,
-                    processingTime: `${result.details?.processingTime}ms`,
-                  }, null, 2)
-                }
-              ]
-            };
-          } else {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: false,
-                    error: result.error,
-                    processingTime: `${result.details?.processingTime}ms`
-                  }, null, 2)
-                }
-              ],
-              isError: true
-            };
-          }
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
+        return callTool(async () => {
+          const result = await extractPdf(args as unknown as PdfExtractOptions);
+          return result.success
+            ? {
+                success: true,
+                text: result.text,
+                pageCount: result.pageCount,
+                processingTime: `${result.details?.processingTime}ms`,
               }
-            ],
-            isError: true
-          };
-        }
+            : {
+                success: false,
+                error: result.error,
+                processingTime: `${result.details?.processingTime}ms`,
+              };
+        });
       }
 
       if (name === 'screenshot_pdf') {
-        try {
-          const options = args as unknown as PdfScreenshotOptions;
-          const result = await pdfExtractor.screenshot(options);
-
-          if (result.success) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: true,
-                    screenshots: result.screenshots,
-                    processingTime: `${result.details?.processingTime}ms`,
-                  }, null, 2)
-                }
-              ]
-            };
-          } else {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: false,
-                    error: result.error,
-                    processingTime: `${result.details?.processingTime}ms`
-                  }, null, 2)
-                }
-              ],
-              isError: true
-            };
-          }
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error)
-                }, null, 2)
+        return callTool(async () => {
+          const result = await pdfExtractor.screenshot(args as unknown as PdfScreenshotOptions);
+          return result.success
+            ? {
+                success: true,
+                screenshots: result.screenshots,
+                processingTime: `${result.details?.processingTime}ms`,
               }
-            ],
-            isError: true
-          };
-        }
+            : {
+                success: false,
+                error: result.error,
+                processingTime: `${result.details?.processingTime}ms`,
+              };
+        });
       }
 
       if (name === 'generate_presentation') {
-        try {
-          const options = args as GeneratePresentationOptions;
-          const result = await getPptService().generatePresentation(options);
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => getPptService().generatePresentation(args as GeneratePresentationOptions));
       }
 
       if (name === 'convert_to_markdown') {
-        try {
-          const options = args as unknown as ConvertToMarkdownOptions;
-          const result = await getPptService().convertToMarkdown(options);
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => getPptService().convertToMarkdown(args as unknown as ConvertToMarkdownOptions));
       }
 
       const excelAction = EXCEL_ACTION_MAP[name];
       if (excelAction) {
-        try {
-          const result = await getExcelService().call(excelAction, (args as Record<string, unknown>) ?? {});
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+        return callTool(() => getExcelService().call(excelAction, (args as Record<string, unknown>) ?? {}));
       }
 
       const docxAction = DOCX_ACTION_MAP[name];
       if (docxAction) {
-        try {
+        return callTool(async () => {
           const argsObj = (args as Record<string, unknown>) ?? {};
-          let result: unknown;
           if (docxAction.startsWith('edit:')) {
             // python-docx 子进程编辑已有文档
-            result = await getDocxService().editDocument(docxAction.slice(5), argsObj);
-          } else if (docxAction.startsWith('pdf:')) {
+            return getDocxService().editDocument(docxAction.slice(5), argsObj);
+          }
+          if (docxAction.startsWith('pdf:')) {
             // pdf-lib 水印/二维码（纯 JS）
             const method = docxAction.slice(4) as 'add_watermark' | 'add_qrcode';
             if (method === 'add_watermark') {
-              result = await pdfPostProcessor.addWatermark(argsObj.pdfPath as string, argsObj);
-            } else {
-              result = await pdfPostProcessor.addQrCode(argsObj.pdfPath as string, argsObj.qrCodePath as string, argsObj);
+              return pdfPostProcessor.addWatermark(argsObj.pdfPath as string, argsObj);
             }
-          } else {
-            // 纯 JS docx 生成
-            const svc = getDocxService();
-            switch (docxAction) {
-              case 'create_document':
-                result = await svc.createDocument(argsObj.content as string, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined });
-                break;
-              case 'convert_md_to_docx': {
-                const mdPathArg = argsObj.mdPath as string | undefined;
-                const mdContentArg = argsObj.mdContent as string | undefined;
-                if (!mdPathArg && !mdContentArg) {
-                  throw new Error('Either mdPath or mdContent must be provided');
-                }
-                let mdText: string;
-                let baseDir: string | undefined;
-                if (mdPathArg) {
-                  const mdFilePath = path.resolve(mdPathArg);
-                  await fs.access(mdFilePath);
-                  mdText = await fs.readFile(mdFilePath, 'utf-8');
-                  baseDir = path.dirname(mdFilePath);
-                } else {
-                  mdText = mdContentArg as string;
-                  baseDir = undefined;
-                }
-                let docxOutputPath = argsObj.outputPath as string | undefined;
-                if (!docxOutputPath && mdPathArg) {
-                  const parsed = path.parse(mdPathArg);
-                  docxOutputPath = path.join(parsed.dir, `${parsed.name}.docx`);
-                }
-                result = await svc.convertMdToDocx(
-                  mdText,
-                  baseDir,
-                  docxOutputPath,
-                  {
-                    title: argsObj.title as string | undefined,
-                    embedImages: argsObj.embedImages as boolean | undefined,
-                  },
-                  // 有 mermaid 时用共享浏览器渲染为图片；失败由 DocxService 降级
-                  (html: string) => converter.renderMermaidBlocks(html),
-                );
-                break;
-              }
-              case 'convert_html_to_docx':
-                result = await svc.convertHtmlToDocx(argsObj.htmlContent as string, argsObj.outputPath as string | undefined);
-                break;
-              default:
-                throw new Error(`Unknown docx action: ${docxAction}`);
-            }
+            return pdfPostProcessor.addQrCode(argsObj.pdfPath as string, argsObj.qrCodePath as string, argsObj);
           }
-          const ok = (result as { success?: boolean } | undefined)?.success !== false;
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            isError: !ok,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
-            isError: true,
-          };
-        }
+          // 纯 JS docx 生成
+          const svc = getDocxService();
+          switch (docxAction) {
+            case 'create_document':
+              return svc.createDocument(argsObj.content as string, argsObj.outputPath as string | undefined, { title: argsObj.title as string | undefined });
+            case 'convert_md_to_docx': {
+              const mdPathArg = argsObj.mdPath as string | undefined;
+              const { mdText, baseDir } = await readMarkdownSource(
+                mdPathArg,
+                argsObj.mdContent as string | undefined,
+              );
+              let docxOutputPath = argsObj.outputPath as string | undefined;
+              if (!docxOutputPath && mdPathArg) {
+                const parsed = path.parse(mdPathArg);
+                docxOutputPath = path.join(parsed.dir, `${parsed.name}.docx`);
+              }
+              return svc.convertMdToDocx(
+                mdText,
+                baseDir,
+                docxOutputPath,
+                {
+                  title: argsObj.title as string | undefined,
+                  embedImages: argsObj.embedImages as boolean | undefined,
+                },
+                // 有 mermaid 时用共享浏览器渲染为图片；失败由 DocxService 降级
+                (html: string) => converter.renderMermaidBlocks(html),
+              );
+            }
+            case 'convert_html_to_docx':
+              return svc.convertHtmlToDocx(argsObj.htmlContent as string, argsObj.outputPath as string | undefined);
+            default:
+              throw new Error(`Unknown docx action: ${docxAction}`);
+          }
+        }, (r) => (r as { success?: boolean } | undefined)?.success !== false);
       }
 
       const pdfAction = PDF_ACTION_MAP[name];
       if (pdfAction) {
-        try {
+        return callTool(async () => {
           const argsObj = (args as Record<string, unknown>) ?? {};
-          let result: unknown;
           if (pdfAction === 'encrypt' || pdfAction === 'decrypt') {
             // PyMuPDF 子进程加密/解密
-            result = await getPdfService().call(pdfAction, argsObj);
-          } else {
-            // 纯 JS pdf-lib 操作
-            switch (pdfAction) {
-              case 'merge':
-                result = await mergePdfs(argsObj.pdfPaths as string[], argsObj.outputPath as string);
-                break;
-              case 'split':
-                result = await splitPdf(argsObj.pdfPath as string, argsObj.pageRanges as string, argsObj.outputDir as string | undefined, argsObj.outputNamePrefix as string | undefined);
-                break;
-              case 'extract':
-                result = await extractPages(argsObj.pdfPath as string, argsObj.pageRanges as string, argsObj.outputPath as string);
-                break;
-              case 'compress':
-                result = await compressPdf(argsObj.pdfPath as string, argsObj.outputPath as string | undefined, (argsObj.useObjectStreams as boolean | undefined) ?? true);
-                break;
-              default:
-                throw new Error(`Unknown pdf action: ${pdfAction}`);
-            }
+            return getPdfService().call(pdfAction, argsObj);
           }
-          const ok = result != null && (result as { success?: boolean }).success === true;
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-            isError: !ok,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }) }],
-            isError: true,
-          };
-        }
+          // 纯 JS pdf-lib 操作
+          switch (pdfAction) {
+            case 'merge':
+              return mergePdfs(argsObj.pdfPaths as string[], argsObj.outputPath as string);
+            case 'split':
+              return splitPdf(argsObj.pdfPath as string, argsObj.pageRanges as string, argsObj.outputDir as string | undefined, argsObj.outputNamePrefix as string | undefined);
+            case 'extract':
+              return extractPages(argsObj.pdfPath as string, argsObj.pageRanges as string, argsObj.outputPath as string);
+            case 'compress':
+              return compressPdf(argsObj.pdfPath as string, argsObj.outputPath as string | undefined, (argsObj.useObjectStreams as boolean | undefined) ?? true);
+            default:
+              throw new Error(`Unknown pdf action: ${pdfAction}`);
+          }
+        });
       }
 
       const pptAction = PPT_ACTION_MAP[name];
       if (pptAction) {
-        try {
-          const result = await getPptEditService().call(pptAction, (args as Record<string, unknown>) ?? {});
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }) }],
-            isError: true,
-          };
-        }
+        return callTool(() => getPptEditService().call(pptAction, (args as Record<string, unknown>) ?? {}));
       }
 
       const imageAction = IMAGE_ACTION_MAP[name];
       if (imageAction) {
-        try {
-          const result = await getImageService().call(imageAction, (args as Record<string, unknown>) ?? {});
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-            isError: !result.success,
-          };
-        } catch (error) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }) }],
-            isError: true,
-          };
-        }
+        return callTool(() => getImageService().call(imageAction, (args as Record<string, unknown>) ?? {}));
       }
 
       throw new Error(`Unknown tool: ${name}`);

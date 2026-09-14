@@ -22,9 +22,9 @@ export interface QrcodeOptions {
   width?: number;
   errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H';
   margin?: number;
-  /** 前景色，如 '#000000'（SVG/dataURL 下生效）。 */
+  /** 前景色，如 '#000000'（三种输出格式均生效）。 */
   colorDark?: string;
-  /** 背景色，如 '#FFFFFF'。 */
+  /** 背景色，如 '#FFFFFF'（三种输出格式均生效）。 */
   colorLight?: string;
 }
 
@@ -53,26 +53,24 @@ export async function generateQrcode(options: QrcodeOptions): Promise<QrcodeResu
       format = ext === '.svg' ? 'svg' : ext === '.png' ? 'png' : 'png';
     }
 
-    const qrOptions: qrcode.QRCodeToFileOptions = {
-      width: options.width ?? 300,
+    // 三种输出共享的渲染参数；仅显式指定颜色时传 color，避免覆盖库默认值
+    const commonOptions = {
       errorCorrectionLevel: options.errorCorrectionLevel ?? 'M',
       margin: options.margin ?? 2,
-      ...(options.colorDark ? { color: { dark: options.colorDark, ...(options.colorLight ? { light: options.colorLight } : {}) } } : {}),
+      ...(options.colorDark || options.colorLight
+        ? {
+            color: {
+              dark: options.colorDark ?? '#000000',
+              light: options.colorLight ?? '#FFFFFF',
+            },
+          }
+        : {}),
     };
 
     if (format === 'dataURL') {
       const dataUrl = await qrcode.toDataURL(text, {
+        ...commonOptions,
         width: options.width ?? 300,
-        errorCorrectionLevel: options.errorCorrectionLevel ?? 'M',
-        margin: options.margin ?? 2,
-        ...(options.colorDark || options.colorLight
-          ? {
-              color: {
-                dark: options.colorDark ?? '#000000',
-                light: options.colorLight ?? '#FFFFFF',
-              },
-            }
-          : {}),
       });
       return { success: true, format: 'dataURL', dataURL: dataUrl, details: details() };
     }
@@ -84,22 +82,13 @@ export async function generateQrcode(options: QrcodeOptions): Promise<QrcodeResu
     await fs.mkdir(path.dirname(resolvedOutput), { recursive: true });
 
     if (format === 'svg') {
-      const svg = await qrcode.toString(text, {
-        type: 'svg',
-        errorCorrectionLevel: options.errorCorrectionLevel ?? 'M',
-        margin: options.margin ?? 2,
-        ...(options.colorDark || options.colorLight
-          ? {
-              color: {
-                dark: options.colorDark ?? '#000000',
-                light: options.colorLight ?? '#FFFFFF',
-              },
-            }
-          : {}),
-      });
+      const svg = await qrcode.toString(text, { ...commonOptions, type: 'svg' });
       await fs.writeFile(resolvedOutput, svg);
     } else {
-      await qrcode.toFile(resolvedOutput, text, qrOptions);
+      await qrcode.toFile(resolvedOutput, text, {
+        ...commonOptions,
+        width: options.width ?? 300,
+      });
     }
 
     const fileSize = (await fs.stat(resolvedOutput)).size;

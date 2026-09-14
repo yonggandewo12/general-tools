@@ -179,10 +179,8 @@ export class PdfConverter {
       const parentDir = path.dirname(outputPath);
       await fs.mkdir(parentDir, { recursive: true }).catch(() => {});
 
-      // Generate PDF
-      if (outputPath) {
-        pdfOptions.path = outputPath;
-      }
+      // Generate PDF（outputPath 此时必为 string：上方分支已保证赋值）
+      pdfOptions.path = outputPath;
 
       await page.pdf(pdfOptions);
 
