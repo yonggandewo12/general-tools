@@ -84,9 +84,89 @@ describe('PPTX 读取', () => {
     }
   });
 
+  it('pptx_to_images 的 dpi 对应真实像素尺寸（10in 宽 → dpi×10）', async () => {
+    const outDir = path.join(dir, 'imgs-dpi');
+    const r = await svc.call('to_images', { pptxPath: deckPath, outputDir: outDir, dpi: 144 });
+    expect(r.success).toBe(true);
+    const files = r.data!.files as { width: number; height: number }[];
+    // 夹具为 10×7.5 英寸；SVG 画布按 96px/英寸生成，缩放基准必须是 96 而非 72。
+    expect(files[0].width).toBe(1440);
+    expect(files[0].height).toBe(1080);
+  });
+
+  it('pptx_to_images 把幻灯片内嵌图片渲染进输出（非空白）', async () => {
+    const seed = path.join(dir, 'seed.png');
+    const picDeck = path.join(dir, 'pic.pptx');
+    const code = `
+from PIL import Image
+from pptx import Presentation
+from pptx.util import Inches
+Image.new('RGB', (200, 120), (220, 30, 30)).save(${JSON.stringify(seed)})
+prs = Presentation()
+s = prs.slides.add_slide(prs.slide_layouts[5])
+s.shapes.add_picture(${JSON.stringify(seed)}, Inches(1), Inches(2), width=Inches(3))
+prs.save(${JSON.stringify(picDeck)})
+`;
+    const made = spawnSync(py, ['-c', code], { encoding: 'utf-8' });
+    expect(made.status).toBe(0);
+
+    const outDir = path.join(dir, 'imgs-pic');
+    const r = await svc.call('to_images', { pptxPath: picDeck, outputDir: outDir, dpi: 96 });
+    expect(r.success).toBe(true);
+
+    // 统计红色像素：外部 href 无法被 pymupdf 解析，只有内联 data URI 才有红色。
+    const check = spawnSync(
+      py,
+      [
+        '-c',
+        `
+from PIL import Image
+im = Image.open(${JSON.stringify(path.join(outDir, 'slide_001.png'))}).convert('RGB')
+red = sum(1 for p in im.get_flattened_data() if p[0] > 150 and p[1] < 100 and p[2] < 100)
+print(red)
+`,
+      ],
+      { encoding: 'utf-8' },
+    );
+    expect(check.status).toBe(0);
+    expect(Number(check.stdout.trim())).toBeGreaterThan(1000);
+  });
+
   it('读取不存在的文件返回失败', async () => {
     const r = await svc.call('read_presentation', { pptxPath: path.join(dir, 'no.pptx') });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('单行 JSON 协议健壮性', () => {
+  // 库层（如 PyMuPDF 的 C 代码）会绕过 sys.stdout 直接写 fd 1，既污染协议
+  // 也无法被 redirect_stdout 捕获。run.py 应把这类杂散输出转到 stderr。
+  it('库层直接写 fd 1 的杂散输出不会污染协议', async () => {
+    const runPy = path.join(process.cwd(), 'scripts', 'ppt-master', 'scripts', 'ppt_mcp', 'run.py');
+    const driver = `
+import importlib.util, os, sys
+sys.argv = ['run.py', '--action', 'read_presentation', '--params', ${JSON.stringify(
+      JSON.stringify({ pptxPath: deckPath }),
+    )}]
+spec = importlib.util.spec_from_file_location('ppt_run', ${JSON.stringify(runPy)})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+os.write(1, b"svg: ignoring external image '../assets/image2.png'\\n")
+print('stray print line')
+sys.exit(mod.main())
+`;
+    const r = spawnSync(py, ['-c', driver], { encoding: 'utf-8', cwd: process.cwd() });
+
+    // stdout 必须仍是可解析的单行 JSON
+    const lines = r.stdout.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]) as { success: boolean; data: { slideCount: number } };
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.slideCount).toBe(2);
+
+    // 杂散输出被改道到 stderr
+    expect(r.stderr).toContain('ignoring external image');
+    expect(r.stderr).toContain('stray print line');
   });
 });
 

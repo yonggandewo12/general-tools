@@ -129,8 +129,12 @@ def to_images(
 ) -> dict[str, Any]:
     """每页幻灯片渲染为 PNG/JPEG 图片。
 
-    流程：pptx_to_svg 生成自包含 SVG（inheritance_mode='flat'）→
-    pymupdf 渲染为位图。targetPages 用与 PDF 相同的 "1-3,5,7-9" 语法。
+    流程：pptx_to_svg 生成 SVG（inheritance_mode='flat' + embed_images）→
+    pymupdf 渲染为位图。slides 用与 PDF 相同的 "1-3,5,7-9" 语法。
+
+    embed_images 是必需的：PyMuPDF 不解析 SVG 里的外部图片 href
+    （"ignoring external image"），写成外部文件会渲染成空白；内联
+    data URI 才能让图片真正出现在输出位图里。
     """
     path = Path(pptxPath).expanduser().resolve()
     if not path.exists():
@@ -142,8 +146,11 @@ def to_images(
     from pptx_to_svg import convert_pptx_to_svg
     from pptx_to_svg.converter import ConvertOptions
 
-    # flat 模式产出自包含 SVG（内联继承的母版/版式 shape），适合逐页渲染
-    convert_pptx_to_svg(path, out_dir, ConvertOptions(inheritance_mode="flat"))
+    # flat 模式产出自包含 SVG（内联继承的母版/版式 shape），embed_images
+    # 内联图片为 data URI —— pymupdf 不会解析外部 href，见上方注释。
+    convert_pptx_to_svg(
+        path, out_dir, ConvertOptions(inheritance_mode="flat", embed_images=True)
+    )
 
     svg_dir = out_dir / "svg-flat"
     if not svg_dir.exists():
@@ -157,7 +164,9 @@ def to_images(
     import pymupdf
 
     ext = "jpg" if format == "jpeg" else "png"
-    zoom = max(0.1, dpi) / 72.0
+    # SVG 画布按 96 px/英寸生成（如 10in → 960px），pymupdf 的 zoom 是
+    # 相对该基准的倍率，故换算分母是 96 而非 72。
+    zoom = max(0.1, dpi) / 96.0
     matrix = pymupdf.Matrix(zoom, zoom)
 
     files: list[dict[str, Any]] = []

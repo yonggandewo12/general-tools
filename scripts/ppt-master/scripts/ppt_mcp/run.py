@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -37,6 +38,22 @@ from console_encoding import configure_utf8_stdio  # noqa: E402
 from ppt_mcp import reader, writer  # noqa: E402
 
 configure_utf8_stdio()
+
+# 保护 stdout 的单行 JSON 协议。部分 C 扩展在库层直接写 fd 1（PyMuPDF 渲染
+# SVG 时不解析外部图片引用，会打印 "svg: ignoring external image ..."），
+# 这类写入绕过 Python 的 sys.stdout 对象，既污染协议也无法被 redirect_stdout
+# 捕获，Node 侧会以 BAD_OUTPUT 报错。做法：先把真实 stdout 复制一份专供协议
+# 输出，再把 fd 1 指向 stderr，于是库和 print 的杂散输出全部落到 stderr。
+try:
+    _PROTOCOL_FD: int | None = os.dup(sys.stdout.fileno())
+except (OSError, ValueError):
+    _PROTOCOL_FD = None
+if _PROTOCOL_FD is not None:
+    try:
+        os.dup2(2, 1)
+    except OSError:
+        os.close(_PROTOCOL_FD)
+        _PROTOCOL_FD = None
 
 logger = logging.getLogger("ppt_mcp.run")
 
@@ -57,9 +74,22 @@ ACTIONS: dict[str, Callable[..., Any]] = {
 
 
 def _emit(obj: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(obj, default=str, ensure_ascii=False))
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    """把结果写成 stdout 上的单行 JSON。
+
+    走 _PROTOCOL_FD（fd 1 的私有副本），绕开被重定向到 stderr 的 fd 1，
+    从而不受库层杂散输出影响。
+    """
+    payload = json.dumps(obj, default=str, ensure_ascii=False) + "\n"
+    if _PROTOCOL_FD is None:
+        sys.stdout.write(payload)
+        sys.stdout.flush()
+        return
+    view = memoryview(payload.encode("utf-8"))
+    while view:
+        written = os.write(_PROTOCOL_FD, view)
+        if written <= 0:  # 不可达；防御性退出，避免死循环
+            raise OSError("stdout closed while writing protocol response")
+        view = view[written:]
 
 
 def _ok(result: Any) -> None:
