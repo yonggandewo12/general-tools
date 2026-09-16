@@ -480,11 +480,24 @@ export class HtmlToDocxConverter {
   /** HTML 表格 → 真正的 docx Table（等宽网格 + 表头加粗底纹）。 */
   private createTableElements(element: ParsedElement, baseStyle: StyleMapping, $: any): any {
     const sanitizedHtml = this.sanitizeHtml(element.html);
-    const $table = $('<div>' + sanitizedHtml + '</div>');
+    // element.html 是 table 的内层 html；thead/tbody/tr/td 只有在 <table> 上下文里
+    // 才会被解析器保留（在 div 里按 HTML5 规则被丢弃、只剩文本），因此外层必须
+    // 用 table 标签包裹，不能用 div。
+    const $table = $('<table>' + sanitizedHtml + '</table>');
     const cellTexts: string[][] = [];
     const headerFlags: boolean[] = [];
     let maxCols = 0;
-    $table.find('tr').each((_i: number, tr: any) => {
+    // 只取本表直接结构行（thead/tbody/tfoot 或 table 的直接子 tr）。find('tr') 会
+    // 下钻到单元格里的嵌套表格，把内层行重复算作本表的顶层行。
+    const rowNodes: any[] = [];
+    $table.children('thead, tbody, tfoot, tr').each((_i: number, section: any) => {
+      if (section.tagName.toLowerCase() === 'tr') {
+        rowNodes.push(section);
+      } else {
+        $(section).children('tr').each((_j: number, tr: any) => rowNodes.push(tr));
+      }
+    });
+    rowNodes.forEach((tr) => {
       const $tr = $(tr);
       const cells: string[] = [];
       let hasTh = false;

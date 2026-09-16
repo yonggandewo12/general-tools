@@ -70,6 +70,55 @@ describe('DOCX 生成（纯 JS docx 包）', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('convertMdToDocx 保留 markdown 表格为真 DOCX 表格', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'table.docx');
+    const r = await getDocxService().convertMdToDocx(
+      '# MD 标题\n\n| 列A | 列B |\n|---|---|\n| 1 | 2 |\n',
+      undefined,
+      out,
+      {},
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect(xml).toMatch(/<w:tbl[>\s]/);
+    expect(xml).toContain('列A');
+    expect(xml).toContain('列B');
+    expect(xml).toContain('1');
+    expect(xml).toContain('2');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 嵌套表格不重复输出内层行', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'nested.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table><tr><td>o<table><tr><td>n</td></tr></table></td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    // 内层表的行不能重复算作本表行：只有 1 行 1 格，"on" 恰好保留一次
+    expect((xml.match(/<w:tr[>\s]/g) ?? []).length).toBe(1);
+    expect((xml.match(/<w:tc[>\s]/g) ?? []).length).toBe(1);
+    expect(xml).toContain('>on<');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 空表不产出、colspan 表降级补齐不丢内容', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'degrade.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<p>前</p><table></table><table><tr><td colspan="2">wide</td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect((xml.match(/<w:tbl[>\s]/g) ?? []).length).toBe(1); // 空表无 w:tbl，colspan 表产出
+    expect(xml).toContain('wide'); // 内容不丢失
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('convertHtmlToDocx 将 HTML 转为有效 docx', async () => {
     const dir = await tmp();
     const out = path.join(dir, 'c.docx');
