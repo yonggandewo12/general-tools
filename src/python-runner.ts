@@ -48,6 +48,35 @@ const PACKAGE_SCOPE = ''; // Unscoped; main package is also unscoped to avoid np
 const RUNTIME_PKG_PREFIX = `general-tools-mcp-server-runtime-`;
 const PYTHON_MINOR = '3.12';
 
+/** 仍在运行的 Python 子进程。信号退出时由 killActiveChildren 兜底杀掉，
+ *  防止在途转换的 Python/Puppeteer/soffice 子进程在 process.exit 后被孤儿化。 */
+const activeChildren = new Set<import('child_process').ChildProcess>();
+
+/** 强制终止所有未退出的 Python 子进程（默认 SIGKILL，配合超时兜底使用）。 */
+export function killActiveChildren(signal: NodeJS.Signals = 'SIGKILL'): void {
+  for (const child of activeChildren) {
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  }
+}
+
+/** 包根目录在单进程内恒定，模块加载时向上查找一次并缓存。 */
+const cachedPackageRoot: string = (() => {
+  const currentFile = fileURLToPath(import.meta.url);
+  let dir = path.dirname(currentFile);
+  while (dir !== path.dirname(dir)) {
+    if (existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  throw new Error('Cannot locate package root (no package.json ancestor)');
+})();
+
+/** 返回包含 package.json 的包根目录（python-runner / service 基类共用）。 */
+export function resolvePackageRoot(): string {
+  return cachedPackageRoot;
+}
+
 /**
  * Map the current process's platform/arch to the matching npm sub-package
  * suffix. Returns `null` when the host is not one of the 5 supported triples.
@@ -305,21 +334,9 @@ export class PythonScriptRunner {
       this.embeddedPkgRoot = embedded.pkgRoot;
     } else {
       this.scriptsRoot =
-        scriptsRootOverride ?? path.join(this.resolvePackageRoot(), 'scripts', 'ppt-master', 'scripts');
+        scriptsRootOverride ?? path.join(resolvePackageRoot(), 'scripts', 'ppt-master', 'scripts');
       this.embeddedPkgRoot = undefined;
     }
-  }
-
-  private resolvePackageRoot(): string {
-    const currentFile = fileURLToPath(import.meta.url);
-    let dir = path.dirname(currentFile);
-    while (dir !== path.dirname(dir)) {
-      if (existsSync(path.join(dir, 'package.json'))) {
-        return dir;
-      }
-      dir = path.dirname(dir);
-    }
-    throw new Error('Cannot locate package root (no package.json ancestor)');
   }
 
   scriptPath(relative: string): string {
@@ -424,6 +441,7 @@ export class PythonScriptRunner {
         env,
         stdio: [hasStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       });
+      activeChildren.add(child);
 
       let stdout = '';
       let stderr = '';
@@ -444,12 +462,15 @@ export class PythonScriptRunner {
       const timeout = setTimeout(() => {
         child.kill('SIGTERM');
         setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
+          // child.killed only reports that a signal was sent, not that the
+          // process exited — escalate only while it is actually still running.
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
         }, 5000).unref();
       }, timeoutMs);
 
       child.on('error', (err) => {
         clearTimeout(timeout);
+        activeChildren.delete(child);
         const e = err as NodeJS.ErrnoException;
         if (e.code === 'ENOENT') {
           reject(
@@ -466,6 +487,7 @@ export class PythonScriptRunner {
 
       child.on('close', (exitCode) => {
         clearTimeout(timeout);
+        activeChildren.delete(child);
         resolve({ exitCode: exitCode ?? -1, stdout, stderr });
       });
     });

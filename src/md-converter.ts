@@ -4,6 +4,7 @@ import { imageSize } from 'image-size';
 import { MdToPdfOptions, ConvertMdResult, MdConvertStats, PAPER_FORMAT_DIMENSIONS } from './types.js';
 import { PdfConverter } from './pdf-converter.js';
 import { probePdf, PdfProbeResult } from './pdf-probe.js';
+import { readMarkdownSource } from './markdown-source.js';
 import markdownit from 'markdown-it';
 import anchor from 'markdown-it-anchor';
 import { mermaidBundleSource, escapeInlineScript } from './mermaid-bundle.js';
@@ -782,24 +783,9 @@ export class MdConverter {
     const startTime = Date.now();
 
     try {
-      // Validate input
-      if (!options.mdPath && !options.mdContent) {
-        throw new Error('Either mdPath or mdContent must be provided');
-      }
-
-      // Read markdown
-      let mdContent: string;
-      let baseDir: string | undefined;
-
-      if (options.mdPath) {
-        const mdPath = path.resolve(options.mdPath);
-        await fs.access(mdPath);
-        mdContent = await fs.readFile(mdPath, 'utf-8');
-        baseDir = path.dirname(mdPath);
-      } else {
-        mdContent = options.mdContent!;
-        baseDir = undefined;
-      }
+      const source = await readMarkdownSource(options.mdPath, options.mdContent);
+      const mdContent = source.mdText;
+      const baseDir = source.baseDir;
 
       // Convert MD to HTML
       const { html, stats } = await this.convertMdToHtml(mdContent, options, baseDir);

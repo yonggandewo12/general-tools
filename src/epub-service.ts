@@ -12,6 +12,7 @@ import { pathToFileURL } from 'url';
 import MarkdownIt from 'markdown-it';
 import * as cheerio from 'cheerio';
 import Epub, { EpubOptions as EpubGenOptions } from 'epub-gen';
+import { readMarkdownSource } from './markdown-source.js';
 
 export interface EpubOptions {
   mdPath?: string;
@@ -77,18 +78,15 @@ export async function mdToEpub(options: EpubOptions): Promise<EpubResult> {
   try {
     let mdText: string;
     let baseDir = process.cwd();
-    if (options.mdContent !== undefined) {
-      mdText = options.mdContent;
-    } else if (options.mdPath) {
-      try {
-        mdText = await fs.readFile(options.mdPath, 'utf-8');
-        baseDir = path.dirname(path.resolve(options.mdPath));
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        throw new Error(code === 'ENOENT' ? `Markdown 文件不存在: ${options.mdPath}` : `Markdown 文件读取失败 (${code ?? 'UNKNOWN'}): ${options.mdPath}`);
+    try {
+      const source = await readMarkdownSource(options.mdPath, options.mdContent);
+      mdText = source.mdText;
+      baseDir = source.baseDir ?? process.cwd();
+    } catch (err) {
+      if (options.mdPath && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`Markdown 文件不存在: ${options.mdPath}`);
       }
-    } else {
-      throw new Error('必须提供 mdPath 或 mdContent 之一');
+      throw err;
     }
 
     const md = new MarkdownIt({ html: true, typographer: true });

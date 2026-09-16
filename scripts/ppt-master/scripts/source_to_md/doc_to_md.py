@@ -672,11 +672,15 @@ def _docx_inject_math_latex(
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
     tmp.close()
     out_path = Path(tmp.name)
-    with zipfile.ZipFile(input_file) as zin, \
-            zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            data = patched_xml if item.filename == "word/document.xml" else zin.read(item.filename)
-            zout.writestr(item, data)
+    try:
+        with zipfile.ZipFile(input_file) as zin, \
+                zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = patched_xml if item.filename == "word/document.xml" else zin.read(item.filename)
+                zout.writestr(item, data)
+    except BaseException:
+        out_path.unlink(missing_ok=True)
+        raise
     return out_path, replacements
 
 
@@ -977,20 +981,27 @@ def _sanitize_epub_manifest(src: Path) -> tuple[Path, bool]:
             tmp.close()
             out_path = Path(tmp.name)
 
-            with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
-                if "mimetype" in names:
-                    zout.writestr(
-                        zipfile.ZipInfo("mimetype"),
-                        zin.read("mimetype"),
-                        compress_type=zipfile.ZIP_STORED,
-                    )
-                for name in zin.namelist():
-                    if name == "mimetype":
-                        continue
-                    if name == opf_path:
-                        zout.writestr(name, new_opf)
-                    else:
-                        zout.writestr(name, zin.read(name))
+            completed = False
+            try:
+                with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
+                    if "mimetype" in names:
+                        zout.writestr(
+                            zipfile.ZipInfo("mimetype"),
+                            zin.read("mimetype"),
+                            compress_type=zipfile.ZIP_STORED,
+                        )
+                    for name in zin.namelist():
+                        if name == "mimetype":
+                            continue
+                        if name == opf_path:
+                            zout.writestr(name, new_opf)
+                        else:
+                            zout.writestr(name, zin.read(name))
+                completed = True
+            finally:
+                # 写盘中途抛错（BadZipFile/OSError 等）时清掉半成品，避免 /tmp 泄漏
+                if not completed:
+                    out_path.unlink(missing_ok=True)
 
             preview = ", ".join(bad_hrefs[:3])
             if len(bad_hrefs) > 3:
@@ -1193,8 +1204,12 @@ def _convert_with_pandoc(input_file: Path, out_file: Path, suffix: str) -> str:
     if suffix in PANDOC_MEDIA_FORMATS:
         cmd.extend(["--extract-media", rel_media_dir])
 
-    result = subprocess.run(cmd, capture_output=True, text=True,
-                            cwd=str(out_file.parent))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                cwd=str(out_file.parent), timeout=120)
+    except subprocess.TimeoutExpired:
+        print("[ERROR] Pandoc conversion timed out")
+        return ""
     if result.returncode != 0:
         print(f"[ERROR] Pandoc conversion failed:\n{result.stderr}")
         return ""

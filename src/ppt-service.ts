@@ -1,6 +1,4 @@
-import { PythonScriptService, ScriptServiceCallResult } from './python-script-service.js';
-
-export type PptServiceCallResult = ScriptServiceCallResult;
+import { PythonScriptService } from './python-script-service.js';
 
 /**
  * PPTX 读取/编辑服务：通过子进程调用

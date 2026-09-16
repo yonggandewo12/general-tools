@@ -1,6 +1,4 @@
-import { PythonScriptService, ScriptServiceCallResult } from './python-script-service.js';
-
-export type ImageServiceCallResult = ScriptServiceCallResult;
+import { PythonScriptService } from './python-script-service.js';
 
 /**
  * 图片处理服务：通过子进程调用

@@ -206,8 +206,9 @@ def _convert_office_vector_to_png(filename: str, img_bytes: bytes) -> bytes | No
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=60,
             )
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return None
         if not dst.exists():
             return None

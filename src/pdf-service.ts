@@ -1,6 +1,4 @@
-import { PythonScriptService, ScriptServiceCallResult } from './python-script-service.js';
-
-export type PdfServiceCallResult = ScriptServiceCallResult;
+import { PythonScriptService } from './python-script-service.js';
 
 /**
  * PDF 操作服务（加密/解密）：通过子进程调用 scripts/pdf/run.py。

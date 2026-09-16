@@ -218,30 +218,6 @@ ${content}
     }
   }
 
-  /** 检查 python-docx 依赖是否可用（供 tools 调用前校验/诊断）。 */
-  async checkDependencies(): Promise<{ available: boolean; version?: string; error?: string }> {
-    try {
-      const runner = this.getRunner();
-      await runner.checkPython();
-      const result = await runner.runPath(DOCX_RUN_PY, ['--check'], { timeoutMs: 30000 });
-      const stdout = result.stdout?.trim();
-      if (stdout) {
-        try {
-          const parsed = JSON.parse(stdout);
-          if (parsed.success) {
-            return { available: true, version: parsed.data?.['python-docx'] };
-          }
-          return { available: false, error: parsed?.error ?? 'python-docx unavailable' };
-        } catch {
-          // fall through to generic failure below
-        }
-      }
-      return { available: false, error: 'python-docx unavailable' };
-    } catch (error) {
-      return { available: false, error: error instanceof Error ? error.message : String(error) };
-    }
-  }
-
   // ─────────────────────── 工具函数 ───────────────────────
 
   private async resolveOutputPath(

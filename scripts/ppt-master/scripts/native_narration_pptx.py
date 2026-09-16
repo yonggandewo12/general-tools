@@ -526,12 +526,17 @@ def init_project(args: argparse.Namespace) -> int:
 
     source_md = project_path / "sources" / f"{source_pptx.stem}.md"
     ppt_to_md = _SCRIPTS_DIR / "source_to_md" / "ppt_to_md.py"
-    result = subprocess.run(
-        [sys.executable, str(ppt_to_md), str(archived_pptx), "-o", str(source_md)],
-        check=False,
-        text=True,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ppt_to_md), str(archived_pptx), "-o", str(source_md)],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        print("[ERROR] ppt_to_md timed out while generating the source markdown", file=sys.stderr)
+        return 1
     if result.returncode != 0:
         print(result.stderr or result.stdout, file=sys.stderr)
         return result.returncode

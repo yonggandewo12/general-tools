@@ -169,9 +169,12 @@ def validate_project(project_path: Path) -> dict[str, Any]:
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=300,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"Missing executable: {sys.executable}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ppt_to_md timed out during template readback validation") from exc
     except subprocess.CalledProcessError as exc:
         details = (exc.stderr or exc.stdout or "").strip()
         raise RuntimeError(details or "ppt_to_md read-back failed") from exc

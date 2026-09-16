@@ -1,7 +1,6 @@
 import { existsSync } from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { PythonScriptRunner } from './python-runner.js';
+import { PythonScriptRunner, resolvePackageRoot } from './python-runner.js';
 
 export interface ScriptServiceCallResult {
   success: boolean;
@@ -9,6 +8,8 @@ export interface ScriptServiceCallResult {
   error?: string;
   code?: string;
   errorType?: string;
+  /** run.py 错误响应附带的候选列表（如 UNKNOWN_ACTION 时的可用 action 名）。 */
+  available?: string[];
   details?: {
     processingTime: number;
   };
@@ -30,24 +31,12 @@ export abstract class PythonScriptService {
   private depChecked = false;
 
   constructor(runScriptRelative: string, scriptsRootRelative: string, label: string, depHint: string) {
-    const pkgRoot = this.resolvePackageRoot();
+    const pkgRoot = resolvePackageRoot();
     this.runScript = path.join(pkgRoot, ...runScriptRelative.split('/'));
     const scriptsRoot = path.join(pkgRoot, ...scriptsRootRelative.split('/'));
     this.runner = new PythonScriptRunner(undefined, scriptsRoot);
     this.label = label;
     this.depHint = depHint;
-  }
-
-  private resolvePackageRoot(): string {
-    const currentFile = fileURLToPath(import.meta.url);
-    let dir = path.dirname(currentFile);
-    while (dir !== path.dirname(dir)) {
-      if (existsSync(path.join(dir, 'package.json'))) {
-        return dir;
-      }
-      dir = path.dirname(dir);
-    }
-    throw new Error('Cannot locate package root (no package.json ancestor)');
   }
 
   async checkDeps(): Promise<void> {
@@ -92,6 +81,7 @@ export abstract class PythonScriptService {
         error?: string;
         code?: string;
         error_type?: string;
+        available?: string[];
       };
       return {
         success: parsed.success === true,
@@ -100,6 +90,7 @@ export abstract class PythonScriptService {
         code: parsed.code,
         // Python 协议输出 snake_case error_type，归一化为 camelCase 接口字段
         errorType: parsed.error_type,
+        available: parsed.available,
         details: { processingTime },
       };
     } catch {

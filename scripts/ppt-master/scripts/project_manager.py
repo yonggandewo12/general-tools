@@ -252,9 +252,12 @@ class ProjectManager:
                 encoding="utf-8",
                 errors="replace",
                 env=child_env,
+                timeout=300,
             )
         except FileNotFoundError as exc:
             raise RuntimeError(f"Missing executable: {args[0]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Tool execution timed out: {args[0]}") from exc
         except subprocess.CalledProcessError as exc:
             details = (exc.stderr or exc.stdout or "").strip()
             raise RuntimeError(details or "tool execution failed") from exc

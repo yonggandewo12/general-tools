@@ -222,7 +222,10 @@ def _relax_output_permissions(output_path: Path) -> list[str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=15,
         )
+    except subprocess.TimeoutExpired as exc:
+        warnings.append(f"icacls timed out for {output_path}: {exc}")
     except OSError as exc:
         warnings.append(f"icacls skipped for {output_path}: {exc}")
     else:

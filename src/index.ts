@@ -12,12 +12,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { PdfConverter } from './pdf-converter.js';
 import { MdConverter } from './md-converter.js';
+import { readMarkdownSource } from './markdown-source.js';
 import { classifyPdf } from './pdf-inspector-service.js';
 import { ConvertOptions, MdToPdfOptions, ConvertImageOptions, OcrOptions, PdfExtractOptions, PdfScreenshotOptions, GeneratePresentationOptions, ConvertToMarkdownOptions } from './types.js';
 import { LocalOcrService } from './local-ocr-service.js';
 import { PdfExtractor } from './pdf-extractor.js';
 import { extractPdf } from './pdf-extract-adapter.js';
 import { PptMasterService } from './ppt-master-service.js';
+import { killActiveChildren } from './python-runner.js';
 import { ExcelService } from './excel-service.js';
 import { EXCEL_TOOLS, EXCEL_ACTION_MAP } from './excel-tools.js';
 import { DOCX_TOOLS, DOCX_ACTION_MAP } from './docx-tools.js';
@@ -627,22 +629,19 @@ async function callTool(
 }
 
 /**
- * 读取 Markdown 源：mdPath（本地文件，返回其所在目录供相对资源解析）
- * 或 mdContent（原始字符串）。两者都缺时抛错。
+ * 优雅退出：给 converter.cleanup() 一个超时兜底（浏览器僵死时不能让
+ * process.exit(0) 永不执行、卡死 stdio MCP），随后杀掉仍在运行的 Python
+ * 子进程（在途转换的 Python/Puppeteer/soffice），再退出。
  */
-async function readMarkdownSource(
-  mdPath?: string,
-  mdContent?: string,
-): Promise<{ mdText: string; baseDir: string | undefined }> {
-  if (!mdPath && !mdContent) {
-    throw new Error('Either mdPath or mdContent must be provided');
-  }
-  if (mdPath) {
-    const mdFilePath = path.resolve(mdPath);
-    await fs.access(mdFilePath);
-    return { mdText: await fs.readFile(mdFilePath, 'utf-8'), baseDir: path.dirname(mdFilePath) };
-  }
-  return { mdText: mdContent!, baseDir: undefined };
+async function shutdown(): Promise<void> {
+  const cleanupTimeout = new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 5000);
+    timer.unref();
+  });
+  // cleanup 拒绝（而非挂起）时同样不能让 process.exit 缺席，故吞掉其 rejection
+  await Promise.race([converter.cleanup().catch(() => {}), cleanupTimeout]);
+  killActiveChildren();
+  process.exit(0);
 }
 
 class Md2PdfServer {
@@ -670,9 +669,8 @@ class Md2PdfServer {
       console.error('[MCP Error]', error);
     };
 
-    const handleSignal = async () => {
-      await converter.cleanup();
-      process.exit(0);
+    const handleSignal = () => {
+      void shutdown();
     };
 
     process.on('SIGINT', handleSignal);
@@ -828,7 +826,6 @@ class Md2PdfServer {
       if (name === 'md_to_epub') {
         return callTool(async () => {
           const { mdPath, mdContent, outputPath, title, author, publisher, cover, splitByHeading, embedImages, version } = args as Record<string, unknown>;
-          if (!mdPath && !mdContent) throw new Error('Either mdPath or mdContent must be provided');
           if (!outputPath) throw new Error('outputPath is required');
           return mdToEpub({
             mdPath: mdPath as string | undefined,
@@ -1039,9 +1036,8 @@ class Md2PdfServer {
     console.error('General Tools MCP Server running on stdio');
 
     // Exit when parent closes stdin (EOF), so the process doesn't hang
-    process.stdin.on('end', async () => {
-      await converter.cleanup();
-      process.exit(0);
+    process.stdin.on('end', () => {
+      void shutdown();
     });
     process.stdin.resume(); // Ensure stdin stays open so we can detect EOF
   }

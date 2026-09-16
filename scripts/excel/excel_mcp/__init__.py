@@ -11,6 +11,5 @@ __all__ = [
     "tables",
     "validation",
     "cell_validation",
-    "cell_utils",
     "exceptions",
 ]
