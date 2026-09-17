@@ -320,6 +320,8 @@ export interface ConvertToMarkdownResult {
   /** Companion asset directory, if any */
   assetsDir?: string;
   error?: string;
+  /** Non-fatal notices for the caller, e.g. accepted-but-unimplemented options */
+  warnings?: string[];
   details?: {
     processingTime: number;
     sourceType: string;

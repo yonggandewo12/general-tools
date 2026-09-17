@@ -7,7 +7,7 @@
  */
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, UnderlineType, Table, TableRow, TableCell, WidthType, ImageRun } from 'docx';
 import { imageSize } from 'image-size';
-import { readFileSync } from 'fs';
+import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as cheerio from 'cheerio';
 
@@ -93,7 +93,7 @@ export class HtmlToDocxConverter {
     const elements = this.parseHtmlElements($);
 
     for (const element of elements) {
-      const docxElement = this.createDocxElement(element, $);
+      const docxElement = await this.createDocxElement(element, $);
       if (docxElement) {
         if (Array.isArray(docxElement)) {
           docElements.push(...docxElement);
@@ -185,14 +185,14 @@ export class HtmlToDocxConverter {
     return styles;
   }
 
-  private createDocxElement(element: ParsedElement, $: any): any {
+  private async createDocxElement(element: ParsedElement, $: any): Promise<any> {
     const baseStyle = this.styleMap.get(element.tag) ?? {};
     const customStyle = this.convertCssToDocx(element.styles);
     const finalStyle = { ...baseStyle, ...customStyle };
 
     switch (element.tag) {
       case 'img':
-        return this.createImageParagraph(element);
+        return await this.createImageParagraph(element);
       case 'h1':
       case 'h2':
       case 'h3':
@@ -218,7 +218,7 @@ export class HtmlToDocxConverter {
         return new Paragraph({
           alignment: finalStyle.alignment ?? AlignmentType.LEFT,
           spacing: { line: 300, lineRule: 'auto', after: 240, before: 120 },
-          children: this.createTextRuns(element, finalStyle, $),
+          children: await this.createTextRuns(element, finalStyle, $),
         });
       case 'pre':
         return this.createCodeBlock(element, $);
@@ -266,9 +266,9 @@ export class HtmlToDocxConverter {
   }
 
   /** 创建图片段落。支持 data:image URI 和文件路径。失败时返回 null（不崩溃）。 */
-  private createImageParagraph(element: ParsedElement): any {
+  private async createImageParagraph(element: ParsedElement): Promise<any> {
     try {
-      const run = this.createImageRun(element.src);
+      const run = await this.createImageRun(element.src);
       if (!run) return null;
       return new Paragraph({
         spacing: { before: 200, after: 200 },
@@ -280,7 +280,7 @@ export class HtmlToDocxConverter {
   }
 
   /** 从 src 创建 docx ImageRun；支持 data:image URI 和文件路径，失败返回 null。 */
-  private createImageRun(src: string | undefined): ImageRun | null {
+  private async createImageRun(src: string | undefined): Promise<ImageRun | null> {
     try {
       if (!src) return null;
 
@@ -294,7 +294,7 @@ export class HtmlToDocxConverter {
       } else {
         // 文件路径
         const resolved = path.isAbsolute(src) ? src : path.resolve(process.cwd(), src);
-        imgData = readFileSync(resolved);
+        imgData = await fs.readFile(resolved);
       }
 
       // 由内容签名探测尺寸与类型（不信任 mime/扩展名，防止伪造后缀的文件
@@ -324,7 +324,7 @@ export class HtmlToDocxConverter {
     }
   }
 
-  private createTextRuns(element: ParsedElement, baseStyle: StyleMapping, $: any): any[] {
+  private async createTextRuns(element: ParsedElement, baseStyle: StyleMapping, $: any): Promise<any[]> {
     const runs: any[] = [];
     const { html } = element;
     if (!html) {
@@ -338,9 +338,9 @@ export class HtmlToDocxConverter {
     if ($content.length === 0) {
       return [this.createSimpleTextRun(element.text, baseStyle)];
     }
-    $content.contents().each((_i: number, node: any) => {
-      this.processHtmlNode(node, baseStyle, runs, $);
-    });
+    for (const node of $content.contents().toArray()) {
+      await this.processHtmlNode(node, baseStyle, runs, $);
+    }
     return runs.length > 0 ? runs : [this.createSimpleTextRun(element.text, baseStyle)];
   }
 
@@ -349,11 +349,11 @@ export class HtmlToDocxConverter {
     return new TextRun({ text, ...safeStyle, ...(highlight && { highlight }) });
   }
 
-  private processHtmlNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): void {
+  private async processHtmlNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): Promise<void> {
     if (node.type === 'text') {
       this.processTextNode(node, baseStyle, runs);
     } else if (node.type === 'tag') {
-      this.processTagNode(node, baseStyle, runs, $);
+      await this.processTagNode(node, baseStyle, runs, $);
     }
   }
 
@@ -389,11 +389,11 @@ export class HtmlToDocxConverter {
     });
   }
 
-  private processTagNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): void {
+  private async processTagNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): Promise<void> {
     // 行内图片：markdown ![](x) 渲染为 <p><img></p>，需产出 ImageRun
     if (node.name === 'img') {
       const src = $(node).attr('src');
-      const run = this.createImageRun(src);
+      const run = await this.createImageRun(src);
       if (run) runs.push(run);
       return;
     }

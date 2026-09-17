@@ -245,6 +245,29 @@ export class PptMasterService {
 
   async convertToMarkdown(options: ConvertToMarkdownOptions): Promise<ConvertToMarkdownResult> {
     const start = Date.now();
+    // renderVectorFigures/vectorFigureDpi 需 @napi-rs/canvas，目前未实现；
+    // 在 MCP schema 中暴露但未消费会让调用方误以为生效。stderr 供 server 日志，
+    // warnings 随结果回传，让 MCP 调用方能感知参数被忽略。
+    const warnings: string[] = [];
+    if (options.renderVectorFigures || options.vectorFigureDpi !== undefined) {
+      const message =
+        'renderVectorFigures/vectorFigureDpi are accepted but not implemented; ' +
+        'PDF vector figure rendering requires @napi-rs/canvas and will be silently ignored.';
+      console.warn(`[convert_to_markdown] ${message}`);
+      warnings.push(message);
+    }
+
+    const result = await this.convertToMarkdownInner(options, start);
+    if (warnings.length > 0 && result.success) {
+      return { ...result, warnings };
+    }
+    return result;
+  }
+
+  private async convertToMarkdownInner(
+    options: ConvertToMarkdownOptions,
+    start: number,
+  ): Promise<ConvertToMarkdownResult> {
     try {
       const sourceType = options.sourceType && options.sourceType !== 'auto'
         ? options.sourceType

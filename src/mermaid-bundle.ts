@@ -27,15 +27,21 @@ export function mermaidBundlePath(): string | null {
   return cachedPath;
 }
 
+// 3.3MB 字符串只需读取一次；渲染期间 bundle 文件不会变化。
+let cachedSource: string | null | undefined;
+
 /** 返回内置 mermaid.min.js 源码（供 HTML 内联）；不可用时返回 null。 */
 export function mermaidBundleSource(): string | null {
-  const p = mermaidBundlePath();
-  if (!p) return null;
-  try {
-    return readFileSync(p, 'utf8');
-  } catch {
-    return null;
+  if (cachedSource === undefined) {
+    const p = mermaidBundlePath();
+    try {
+      // 读取失败按不可用处理（与 mermaidBundlePath 的失败缓存语义一致）
+      cachedSource = p ? readFileSync(p, 'utf8') : null;
+    } catch {
+      cachedSource = null;
+    }
   }
+  return cachedSource;
 }
 
 /** 内联防护：源码中字面 `</script>` 会提前闭合宿主标签，转义为无效序列。 */
