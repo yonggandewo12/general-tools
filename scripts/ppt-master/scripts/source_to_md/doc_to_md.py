@@ -15,6 +15,7 @@ All paths produce the same output convention:
     <input>.md                     Markdown file
     <input>_files/<asset>          Extracted media (relative references in MD)
 """
+from __future__ import annotations
 
 import argparse
 import base64

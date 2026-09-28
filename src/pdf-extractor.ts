@@ -32,7 +32,11 @@ export class PdfExtractor {
       const pdfFilePath = path.resolve(options.pdfPath);
       await fs.access(pdfFilePath);
 
-      const outputDir = options.outputDir ? path.resolve(options.outputDir) : process.cwd();
+      // 未指定目录时落到带时间戳的子目录，避免多次调用在 cwd 里互相覆盖
+      // screenshot_p<N>.png（显式指定 outputDir 时保持文件名可预期，由调用方管冲突）。
+      const outputDir = options.outputDir
+        ? path.resolve(options.outputDir)
+        : path.join(process.cwd(), `pdf-screenshots-${new Date().toISOString().replace(/[:.]/g, '-')}`);
       await fs.mkdir(outputDir, { recursive: true });
 
       const LiteParse = await getLiteParse();

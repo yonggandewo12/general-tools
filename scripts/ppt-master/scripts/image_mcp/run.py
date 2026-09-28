@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -30,30 +31,70 @@ for _p in (_HERE, _HERE.parent):
         sys.path.insert(0, str(_p))
 
 from console_encoding import configure_utf8_stdio  # noqa: E402
-from image_mcp import ops  # noqa: E402
 
 configure_utf8_stdio()
 
+# 保护 stdout 的单行 JSON 协议（与 ppt_mcp/run.py 相同机制）：真实 stdout
+# 复制到 _PROTOCOL_FD 专供协议输出，fd 1 重定向到 stderr。
+try:
+    _PROTOCOL_FD: int | None = os.dup(sys.stdout.fileno())
+except (OSError, ValueError):
+    _PROTOCOL_FD = None
+if _PROTOCOL_FD is not None:
+    try:
+        os.dup2(2, 1)
+    except OSError:
+        os.close(_PROTOCOL_FD)
+        _PROTOCOL_FD = None
+
 logger = logging.getLogger("image_mcp.run")
 
-ACTIONS: dict[str, Callable[..., Any]] = {
-    "info": ops.image_info,
-    "convert": ops.image_convert,
-    "resize": ops.image_resize,
-    "compress": ops.image_compress,
-    "rotate": ops.image_rotate,
-    "crop": ops.image_crop,
-    "watermark": ops.image_watermark,
-    "gif": ops.image_gif,
-    "quantize": ops.image_quantize,
-    "edit_exif": ops.image_edit_exif,
-}
+# ops 顶层 import Pillow；必须惰性加载，否则缺依赖时 --check/--list 直接以
+# ModuleNotFoundError traceback 失败，Node 侧 checkDeps 拿到原始 traceback
+# 而非 DEP_MISSING。
+_ACTION_NAMES = (
+    "info",
+    "convert",
+    "resize",
+    "compress",
+    "rotate",
+    "crop",
+    "watermark",
+    "gif",
+    "quantize",
+    "edit_exif",
+)
+
+
+def _build_actions() -> dict[str, Callable[..., Any]]:
+    from image_mcp import ops
+    return {
+        "info": ops.image_info,
+        "convert": ops.image_convert,
+        "resize": ops.image_resize,
+        "compress": ops.image_compress,
+        "rotate": ops.image_rotate,
+        "crop": ops.image_crop,
+        "watermark": ops.image_watermark,
+        "gif": ops.image_gif,
+        "quantize": ops.image_quantize,
+        "edit_exif": ops.image_edit_exif,
+    }
 
 
 def _emit(obj: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(obj, default=str, ensure_ascii=False))
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    """单行 JSON 输出到协议 fd。"""
+    payload = json.dumps(obj, default=str, ensure_ascii=False) + "\n"
+    if _PROTOCOL_FD is None:
+        sys.stdout.write(payload)
+        sys.stdout.flush()
+        return
+    view = memoryview(payload.encode("utf-8"))
+    while view:
+        written = os.write(_PROTOCOL_FD, view)
+        if written <= 0:  # 不可达；防御性退出，避免死循环
+            raise OSError("stdout closed while writing protocol response")
+        view = view[written:]
 
 
 def _ok(result: Any) -> None:
@@ -89,7 +130,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list:
-        _emit({"success": True, "data": {"actions": sorted(ACTIONS.keys())}})
+        _emit({"success": True, "data": {"actions": sorted(_ACTION_NAMES)}})
         return 0
 
     if args.check:
@@ -105,9 +146,13 @@ def main() -> int:
         _emit({"success": False, "error": "No --action provided", "code": "MISSING_ACTION"})
         return 1
 
-    fn = ACTIONS.get(args.action)
-    if fn is None:
-        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(ACTIONS.keys())})
+    if args.action not in _ACTION_NAMES:
+        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(_ACTION_NAMES)})
+        return 1
+    try:
+        fn = _build_actions()[args.action]
+    except Exception as e:
+        _emit({"success": False, "error": f"dependencies not available: {e}", "code": "DEP_MISSING", "error_type": e.__class__.__name__})
         return 1
 
     try:

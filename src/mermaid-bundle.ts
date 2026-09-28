@@ -19,12 +19,13 @@ export function mermaidBundlePath(): string | null {
       const require = createRequire(import.meta.url);
       const p = require.resolve('mermaid/dist/mermaid.min.js');
       const st = statSync(p);
-      cachedPath = st.isFile() && st.size > MERMAID_MIN_SIZE ? p : null;
+      // 只缓存成功结果；stat 失败/半下载文件不 latch，允许后续重试
+      if (st.isFile() && st.size > MERMAID_MIN_SIZE) cachedPath = p;
     } catch {
-      cachedPath = null;
+      // 解析失败同样不缓存
     }
   }
-  return cachedPath;
+  return cachedPath ?? null;
 }
 
 // 3.3MB 字符串只需读取一次；渲染期间 bundle 文件不会变化。
@@ -34,14 +35,16 @@ let cachedSource: string | null | undefined;
 export function mermaidBundleSource(): string | null {
   if (cachedSource === undefined) {
     const p = mermaidBundlePath();
-    try {
-      // 读取失败按不可用处理（与 mermaidBundlePath 的失败缓存语义一致）
-      cachedSource = p ? readFileSync(p, 'utf8') : null;
-    } catch {
-      cachedSource = null;
+    if (p) {
+      try {
+        cachedSource = readFileSync(p, 'utf8');
+      } catch {
+        // 读取失败按不可用处理，但不缓存，允许重试
+        return null;
+      }
     }
   }
-  return cachedSource;
+  return cachedSource ?? null;
 }
 
 /** 内联防护：源码中字面 `</script>` 会提前闭合宿主标签，转义为无效序列。 */

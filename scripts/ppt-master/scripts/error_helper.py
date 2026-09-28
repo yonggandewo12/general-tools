@@ -4,6 +4,7 @@ PPT Master - Error Message Helper
 
 Provides user-friendly error messages and specific fix suggestions.
 """
+from __future__ import annotations
 
 import argparse
 from typing import Dict, List, Optional

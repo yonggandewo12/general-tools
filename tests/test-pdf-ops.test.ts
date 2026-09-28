@@ -34,8 +34,12 @@ describe('parsePageRanges', () => {
     expect(parsePageRanges('2,2,4', 5)).toEqual([1, 3]);
   });
 
-  it('超出总页数的页码被 clamp', () => {
-    expect(parsePageRanges('1,99', 3)).toEqual([0, 2]);
+  it('区间终点超出总页数被 clamp（“1-9999”=到末页）', () => {
+    expect(parsePageRanges('1-9999', 3)).toEqual([0, 1, 2]);
+  });
+
+  it('单独页码超出总页数抛错（不再静默取末页）', () => {
+    expect(() => parsePageRanges('1,99', 3)).toThrow(/out of range/);
   });
 
   it('非法语法（倒序区间）抛错', () => {

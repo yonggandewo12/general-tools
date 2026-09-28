@@ -11,6 +11,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { existsSync } from 'fs';
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
+import { embedFontBytesSupportingTtc } from './cjk-font.js';
 
 export interface WatermarkOptions {
   watermarkText?: string;
@@ -60,9 +61,8 @@ export interface PdfPostProcessResult {
   details?: { processingTime: number };
 }
 
-// 跨平台中文字体候选。优先级：真实 TTF/OTF（pdf-lib 的 embedFont 只接受单字体文件，
-// TTC 集合需 fontkit.create(buffer, name) 提取单个字体后才能嵌入——而 pdf-lib 1.17
-// 的 embedFont 不接受已打开的 fontkit 字体对象，所以优先列单字体文件，TTC 兜底）。
+// 跨平台中文字体候选。TTC 集合适配由 cjk-font.embedFontBytesSupportingTtc 处理
+//（collection 展开为首个 face 后走 embedFont 公开 API）。
 const CHINESE_FONT_CANDIDATES = [
   // macOS
   '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
@@ -82,9 +82,9 @@ const CHINESE_FONT_CANDIDATES = [
   'C:\\Windows\\Fonts\\simhei.ttf',
 ];
 
-/** 检测文字是否含 CJK 字符。 */
+/** 检测文字是否含 CJK 字符（含日韩假名、扩展 A/B 区，避免此类文本误走 Helvetica 抛错）。 */
 function hasChinese(text: string): boolean {
-  return /[\u4e00-\u9fa5]/.test(text);
+  return /[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u{20000}-\u{2ebef}]/u.test(text);
 }
 
 /** 将 #RRGGBB（或 #RGB）hex 颜色转成 pdf-lib rgb 对象；非法输入回退黑色。 */
@@ -109,20 +109,14 @@ function hexToRgb(hex: string): import('pdf-lib').Color {
 async function embedChineseFont(
   pdfDoc: PDFDocument,
 ): Promise<import('pdf-lib').PDFFont | null> {
-  try {
-    const fontkit = (await import('fontkit')) as unknown as { default: unknown };
-    pdfDoc.registerFontkit((fontkit.default ?? fontkit) as Parameters<PDFDocument['registerFontkit']>[0]);
-    for (const fp of CHINESE_FONT_CANDIDATES) {
-      if (!existsSync(fp)) continue;
-      try {
-        const fontBytes = await fs.readFile(fp);
-        return await pdfDoc.embedFont(fontBytes, { subset: true });
-      } catch {
-        // 该字体无法嵌入（如 TTC collection），尝试下一个候选
-      }
+  for (const fp of CHINESE_FONT_CANDIDATES) {
+    if (!existsSync(fp)) continue;
+    try {
+      const fontBytes = await fs.readFile(fp);
+      return await embedFontBytesSupportingTtc(pdfDoc, fontBytes);
+    } catch {
+      // 该字体无法嵌入（损坏等），尝试下一个候选
     }
-  } catch {
-    // 无可用中文字体
   }
   return null;
 }
@@ -255,6 +249,34 @@ async function drawImageWatermark(
   page.drawImage(image, { x, y, width: image.width * scale, height: image.height * scale, opacity });
 }
 
+/** 原地原子写回 PDF：同目录临时文件 + rename，避免写入中断损坏用户文件。 */
+async function writePdfAtomic(pdfPath: string, bytes: Uint8Array): Promise<void> {
+  const { randomUUID } = await import('crypto');
+  const tmp = path.join(path.dirname(pdfPath), `.${path.basename(pdfPath)}.${randomUUID()}.tmp`);
+  try {
+    await fs.writeFile(tmp, bytes);
+    await fs.rename(tmp, pdfPath);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/** 按魔数识别 PNG/JPEG 并嵌入（水印与二维码图片都曾是 embedPng-only，JPEG 输入会整体失败）。 */
+async function embedRasterImage(
+  pdfDoc: PDFDocument,
+  bytes: Buffer,
+  srcPath: string,
+): Promise<import('pdf-lib').PDFImage> {
+  const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng =
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (isJpeg) return pdfDoc.embedJpg(bytes);
+  if (isPng) return pdfDoc.embedPng(bytes);
+  throw new Error(`Unsupported watermark image format (expect PNG or JPEG): ${srcPath}`);
+}
+
 /** 计算二维码锚点坐标（doc-ops-mcp 移植）。 */
 function calculateQrPosition(
   position: QrCodeOptions['qrPosition'],
@@ -320,9 +342,17 @@ export class PdfPostProcessor {
       const font = usesImageWatermark
         ? null
         : await resolveWatermarkFont(watermarkText, pdfDoc);
+      // 文字水印是核心交付物：无可用字体（如 CJK 文本 + 系统无中文字体）时
+      // 静默成功会谎报“已加水印”，必须显式失败。
+      if (!usesImageWatermark && !font) {
+        return {
+          success: false,
+          error: `No embeddable font available for watermark text "${watermarkText}" (CJK text requires a system CJK font, e.g. Noto Sans CJK / PingFang / msyh).`,
+        };
+      }
       // 图片水印同样只读一次、嵌入一次，多页复用（pdf-lib 的 embedPng 不去重）
       const watermarkImage = usesImageWatermark
-        ? await pdfDoc.embedPng(await fs.readFile(opts.watermarkImage as string))
+        ? await embedRasterImage(pdfDoc, await fs.readFile(opts.watermarkImage as string), opts.watermarkImage as string)
         : null;
 
       for (const page of pages) {
@@ -336,7 +366,7 @@ export class PdfPostProcessor {
       }
 
       const modifiedPdfBytes = await pdfDoc.save();
-      await fs.writeFile(pdfPath, modifiedPdfBytes);
+      await writePdfAtomic(pdfPath, modifiedPdfBytes);
 
       return {
         success: true,
@@ -361,7 +391,7 @@ export class PdfPostProcessor {
       const pdfDoc = await PDFDocument.load(pdfBytes);
       const pages = pdfDoc.getPages();
       const qrImageBytes = await fs.readFile(qrCodePath);
-      const qrImage = await pdfDoc.embedPng(qrImageBytes);
+      const qrImage = await embedRasterImage(pdfDoc, qrImageBytes, qrCodePath);
 
       if (pages.length > 0) {
         const lastPage = pages[pages.length - 1];
@@ -394,7 +424,7 @@ export class PdfPostProcessor {
       }
 
       const modifiedPdfBytes = await pdfDoc.save();
-      await fs.writeFile(pdfPath, modifiedPdfBytes);
+      await writePdfAtomic(pdfPath, modifiedPdfBytes);
 
       return {
         success: true,
@@ -407,8 +437,8 @@ export class PdfPostProcessor {
   }
 
   /**
-   * PDF 后处理编排：复制源 PDF 到目标位置，依次加可选水印/二维码，清理临时文件。
-   * 不依赖 playwright，源文件可为任意 PDF 路径。
+   * PDF 后处理编排：复制源 PDF 到目标位置，依次加可选水印/二维码。
+   * 源文件不会被删除（调用方拥有它）。不依赖 playwright，源文件可为任意 PDF 路径。
    */
   async processPostConversion(sourcePdfPath: string, targetPath?: string, opts: PostProcessOptions = {}): Promise<PdfPostProcessResult> {
     const start = Date.now();
@@ -450,11 +480,6 @@ export class PdfPostProcessor {
         }
       }
 
-      // 源与目标不同才清理临时源文件
-      if (sourcePdfPath !== finalPath && existsSync(sourcePdfPath)) {
-        await fs.unlink(sourcePdfPath).catch(() => {});
-      }
-
       // 汇总结果：若任一子步骤失败，整体标记为错误
       const failures = results.filter((r) => !r.success);
       const allSuccess = failures.length === 0;
@@ -465,6 +490,9 @@ export class PdfPostProcessor {
         message: allSuccess
           ? `Post-processing done → ${finalPath}`
           : `Post-processing completed with ${failures.length} error(s) → ${finalPath}`,
+        error: allSuccess
+          ? undefined
+          : failures.map((f) => f.error ?? f.message ?? 'unknown error').join('; '),
         details: {
           processingTime: Date.now() - start,
         },

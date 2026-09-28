@@ -221,10 +221,13 @@ export function findChromiumExecutable(): string | null {
 function installHintForOS(): string {
   const p = process.platform;
   if (p === 'darwin') {
-    const arch = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+    if (process.arch !== 'arm64') {
+      // No darwin-x64 runtime sub-package exists (see SUPPORTED_PLATFORM_SUFFIXES).
+      return `macOS ${process.arch} has no embedded runtime package. Install Python 3.10+ (e.g. via https://brew.sh) and set PPT_MASTER_PYTHON.`;
+    }
     return (
       `On macOS, the embedded Python may be blocked by Gatekeeper quarantine. Run:\n` +
-      `  PY="$(node -e "console.log(require.resolve('${RUNTIME_PKG_PREFIX}${arch}/package.json')+'../python/bin/python3.12')")"\n` +
+      `  PY="$(node -e "console.log(require.resolve('${RUNTIME_PKG_PREFIX}darwin-arm64/package.json')+'../python/bin/python3.12')")"\n` +
       `  xattr -dr com.apple.quarantine "$PY" && "$PY" --version\n` +
       `If still failing, install Python 3.10+ via brew (https://brew.sh) and set PPT_MASTER_PYTHON.`
     );
@@ -261,8 +264,16 @@ function probePython(pythonBin: string): string | null {
   }
 }
 
-/** Candidates for system Python 3.10+. */
-const SYSTEM_PYTHON_CANDIDATES = ['python3.12', 'python3.11', 'python3.10', 'python3'];
+/**
+ * Candidates for system Python 3.10+. On Windows, python.org installs expose
+ * `python.exe` (not `python3.exe`), and `python3` is usually the Microsoft
+ * Store alias stub — probePython rejects it by version, so prefer `python`
+ * there.
+ */
+const SYSTEM_PYTHON_CANDIDATES: string[] =
+  process.platform === 'win32'
+    ? ['python', 'python3.12', 'python3.11', 'python3.10', 'python3']
+    : ['python3.12', 'python3.11', 'python3.10', 'python3'];
 
 /**
  * Resolve which Python to use. Throws `MissingPythonError` if none of the
@@ -455,6 +466,9 @@ export class PythonScriptRunner {
       }
 
       if (hasStdin && child.stdin) {
+        // 子进程可能在消费完 stdin 前就退出（脚本报错等），此时写入大 payload
+        // 会触发 EPIPE 的 'error' 事件；不加监听器会变成 uncaughtException 杀死整个 MCP 服务。
+        child.stdin.on('error', () => {});
         child.stdin.end(options!.stdin!);
       }
 
@@ -468,9 +482,21 @@ export class PythonScriptRunner {
         }, 5000).unref();
       }, timeoutMs);
 
-      child.on('error', (err) => {
+      let settled = false;
+      const finish = () => {
+        settled = true;
         clearTimeout(timeout);
         activeChildren.delete(child);
+      };
+      const settle = (exitCode: number) => {
+        if (settled) return;
+        finish();
+        resolve({ exitCode, stdout, stderr });
+      };
+
+      child.on('error', (err) => {
+        if (settled) return;
+        finish();
         const e = err as NodeJS.ErrnoException;
         if (e.code === 'ENOENT') {
           reject(
@@ -485,10 +511,15 @@ export class PythonScriptRunner {
         reject(err);
       });
 
+      // 'close' 需等 stdio 全部 EOF；孙进程（soffice/ppt-master 管道）继承管道时
+      // 可能永不触发，故 'exit' 后加宽限期兜底结算，防止 Promise 永久挂起。
+      child.on('exit', (code) => {
+        const grace = setTimeout(() => settle(code ?? -1), 2000);
+        grace.unref();
+      });
+
       child.on('close', (exitCode) => {
-        clearTimeout(timeout);
-        activeChildren.delete(child);
-        resolve({ exitCode: exitCode ?? -1, stdout, stderr });
+        settle(exitCode ?? -1);
       });
     });
   }

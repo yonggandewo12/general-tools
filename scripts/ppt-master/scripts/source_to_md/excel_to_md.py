@@ -12,6 +12,7 @@ Unsupported by default:
 All paths produce the same output convention:
     <input>.md                     Markdown file
 """
+from __future__ import annotations
 
 import argparse
 import re

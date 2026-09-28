@@ -10,6 +10,7 @@ Usage:
     python3 scripts/rotate_images.py fix <fixes.json>
     python3 scripts/rotate_images.py auto <images_directory>
 """
+from __future__ import annotations
 
 
 import argparse

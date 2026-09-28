@@ -74,12 +74,35 @@ def edit_workbook(filepath: str) -> Iterator[Any]:
     wb = load_workbook(path)
     try:
         yield wb
-        wb.save(path)
+        save_workbook_atomic(wb, path)
     finally:
         try:
             wb.close()
         except Exception:
             pass
+
+
+def save_workbook_atomic(wb: Any, path: str) -> None:
+    """同目录临时文件 + os.replace 原子替换。
+
+    直接 wb.save(path) 会在保存中途出错/磁盘满时把用户工作簿写坏；
+    openpyxl 保存不保证失败后原文件完好，必须走原子替换（与 pdf_ops.py
+    的 _save_with_tmp 同一契约）。Windows 的 os.replace 可覆盖已存在文件。
+    """
+    import tempfile
+
+    dirname = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dirname, prefix=".~xlsx-save-", suffix=".tmp")
+    os.close(fd)
+    try:
+        wb.save(tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def get_or_create_workbook(filepath: str) -> Any:

@@ -15,6 +15,10 @@ import { unzipSync, zipSync, type Unzipped } from 'fflate';
 
 type ZipLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
+/** 解压前按中央目录声明的原始总大小设上限：unzipSync 全量驻留内存，
+ *  zip 炸弹会在单个共享 MCP 进程里 OOM 拖垮所有工具。 */
+const MAX_EXTRACT_TOTAL_BYTES = 512 * 1024 * 1024;
+
 /** POSIX ustar 八进制字段（宽度含结尾 NUL）。 */
 function toOctal(value: number, width: number): string {
   return value.toString(8).padStart(width, '0').slice(-width);
@@ -196,11 +200,15 @@ export async function compressArchive(options: ArchiveCompressOptions): Promise<
   }
 }
 
-/** 安全归一化归档内条目路径：丢弃绝对路径与 `..`，防路径穿越。 */
+/** 安全归一化归档内条目路径：丢弃绝对路径、盘符段与 `..`，防路径穿越。 */
 function sanitizeEntry(name: string): string | null {
   const normalized = name.replace(/\\/g, '/').replace(/^\/+/, '');
   const parts = normalized.split('/').filter((p) => p && p !== '.');
   if (parts.some((p) => p === '..')) return null;
+  // Windows 盘符段（C:/...）：join 后 mkdir 在 win32 抛 EINVAL，整次解压中断。
+  // 直接丢弃此类条目；win32 非法文件名字符同样剔除。
+  if (parts.some((p) => /^[A-Za-z]:$/.test(p))) return null;
+  if (process.platform === 'win32' && parts.some((p) => /[:*?"<>|]/.test(p))) return null;
   return parts.join('/');
 }
 
@@ -224,8 +232,23 @@ export async function extractArchive(options: ArchiveExtractOptions): Promise<Ar
 
     let entries: Unzipped;
     try {
+      // 预扫描：filter 全部返回 false 时不解压任何数据，只读中央目录声明的
+      // originalSize，即可在分配大内存前拒绝 zip 炸弹/超量归档
+      let declaredTotal = 0;
+      unzipSync(bytes, {
+        filter: (f) => {
+          declaredTotal += f.originalSize ?? 0;
+          return false;
+        },
+      });
+      if (declaredTotal > MAX_EXTRACT_TOTAL_BYTES) {
+        throw new Error(
+          `Archive expands to ${(declaredTotal / 1024 / 1024).toFixed(1)} MB, exceeding the ${MAX_EXTRACT_TOTAL_BYTES / 1024 / 1024} MB limit. Use a system unzip tool for large archives.`,
+        );
+      }
       entries = unzipSync(bytes);
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('exceeding')) throw err;
       throw new Error(`无法解析 ZIP 归档（可能已损坏或不是 zip）: ${options.archivePath}`);
     }
 

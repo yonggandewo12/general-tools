@@ -104,7 +104,14 @@ def extract_text(pptxPath: str, outputPath: str | None = None) -> dict[str, Any]
         raise FileNotFoundError(f"PPTX not found: {path}")
 
     out = Path(outputPath).expanduser().resolve() if outputPath else path.with_suffix(".md")
-    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        # 默认输出在源文件旁；源目录只读（如挂载卷/程序目录）时给出可行动指引
+        raise PermissionError(
+            f"Cannot write output next to {path} (directory not writable). "
+            f"Provide an explicit outputPath."
+        ) from e
 
     from source_to_md.ppt_to_md import convert_presentation_to_markdown
 

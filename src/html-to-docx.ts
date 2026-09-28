@@ -555,8 +555,7 @@ export class HtmlToDocxConverter {
       );
     };
 
-    const walkContainer = async (container: any, level: number, isOl: boolean): Promise<void> => {
-      let index = 0;
+    const walkContainer = async (container: any, level: number, isOl: boolean, state: { index: number; step: number }): Promise<void> => {
       for (const child of $(container).contents().toArray()) {
         if (child.type === 'text') {
           // 列表容器里的游离文本（<ul>说明：<li>…</li></ul>）单独成段，不静默丢弃
@@ -571,8 +570,8 @@ export class HtmlToDocxConverter {
           }
         } else if (child.type === 'tag') {
           if (child.name === 'li') {
-            index++;
-            await emitItem(child, isOl ? `${index}. ` : '• ', level);
+            state.index += state.step;
+            await emitItem(child, isOl ? `${state.index}. ` : '• ', level);
             for (const nested of collectTopLists(child)) {
               await processList(nested, level + 1);
             }
@@ -580,15 +579,41 @@ export class HtmlToDocxConverter {
             await processList(child, level + 1);
           } else {
             // 畸形嵌套：li 被 div/section 等包了一层，按本层继续下钻，不丢内容
-            await walkContainer(child, level, isOl);
+            await walkContainer(child, level, isOl, state);
           }
         }
       }
     };
 
+    /** 统计本层（不含嵌套列表）的 li 数，供 reversed 起点计算。 */
+    const countTopLevelItems = (container: any): number => {
+      let n = 0;
+      for (const child of $(container).contents().toArray()) {
+        if (child.type !== 'tag') continue;
+        if (child.name === 'li') n++;
+        else if (child.name !== 'ul' && child.name !== 'ol') n += countTopLevelItems(child);
+      }
+      return n;
+    };
+
     const processList = async (listNode: any, level: number): Promise<void> => {
       const isOl = String(listNode.tagName ?? element.tag).toLowerCase() === 'ol';
-      await walkContainer(listNode, level, isOl);
+      const attribs: Record<string, string> = listNode.attribs ?? {};
+      let index = 0;
+      let step = 1;
+      if (isOl) {
+        const start = parseInt(attribs.start ?? '', 10);
+        const reversed = 'reversed' in attribs;
+        if (reversed) step = -1;
+        const first = Number.isFinite(start)
+          ? start
+          : reversed
+            ? countTopLevelItems(listNode)
+            : 1;
+        // walkContainer 先加 step 再使用，故起点回退一步
+        index = first - step;
+      }
+      await walkContainer(listNode, level, isOl, { index, step });
     };
 
     await processList($list.get(0), 0);

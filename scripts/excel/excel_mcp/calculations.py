@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ._utils import edit_workbook, get_or_create_workbook, require_sheet, validate_cell_ref
+from ._utils import edit_workbook, get_or_create_workbook, require_sheet, resolve_path, save_workbook_atomic, validate_cell_ref
 from .exceptions import CalculationError, ValidationError
 from .validation import validate_formula
 
@@ -28,7 +28,7 @@ def apply_formula(filepath: str, sheet_name: str, cell: str, formula: str) -> di
             if sheet_name not in wb.sheetnames:
                 raise ValidationError(f"Sheet {sheet_name!r} not found")
             wb[sheet_name][cell] = formula
-            wb.save(filepath)
+            save_workbook_atomic(wb, resolve_path(filepath))
         finally:
             try:
                 wb.close()

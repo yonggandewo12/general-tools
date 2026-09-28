@@ -13,6 +13,7 @@ Usage:
     # Get color scheme
     colors = Config.get_color_scheme('consulting')
 """
+from __future__ import annotations
 
 import argparse
 import json

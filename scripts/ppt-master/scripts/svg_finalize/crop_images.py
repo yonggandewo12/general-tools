@@ -14,6 +14,7 @@ Supports 9 alignment modes:
 Usage:
     python3 scripts/svg_finalize/crop_images.py <SVG file or directory> [--dry-run]
 """
+from __future__ import annotations
 
 import os
 import re

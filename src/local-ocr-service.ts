@@ -15,6 +15,9 @@ import { OcrOptions, OcrResult, OcrPageResult } from './types.js';
 import { processPdfWithOcrBuffer } from './pdf-inspector-service.js';
 import { parsePages } from './pdf-extract-adapter.js';
 
+/** 远程图片下载体积上限（64MB）：防超大响应 OOM 共享的 MCP 进程。 */
+const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+
 function isPng(buf: Buffer): boolean {
   return buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
 }
@@ -56,7 +59,16 @@ export class LocalOcrService {
     if (options.imageUrl) {
       const res = await fetch(options.imageUrl, { signal: AbortSignal.timeout(30000) });
       if (!res.ok) throw new Error(`下载图片失败: HTTP ${res.status}`);
-      return imageBytesToPdf(Buffer.from(await res.arrayBuffer()));
+      // 上限防超大响应把共享的 MCP 进程 OOM（默认堆下数十 MB 即危险）
+      const len = Number(res.headers.get('content-length'));
+      if (Number.isFinite(len) && len > MAX_DOWNLOAD_BYTES) {
+        throw new Error(`图片过大: ${len} 字节，上限 ${MAX_DOWNLOAD_BYTES} 字节`);
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_DOWNLOAD_BYTES) {
+        throw new Error(`图片过大: ${buf.length} 字节，上限 ${MAX_DOWNLOAD_BYTES} 字节`);
+      }
+      return imageBytesToPdf(buf);
     }
     if (options.imageBase64) {
       return imageBytesToPdf(Buffer.from(stripDataUriPrefix(options.imageBase64), 'base64'));

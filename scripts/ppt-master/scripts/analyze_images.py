@@ -21,6 +21,7 @@ Output:
     - Generates image_analysis.csv under the project's analysis/ directory
       (sibling of the images folder), alongside the PPTX intake bundle
 """
+from __future__ import annotations
 
 import argparse
 import json

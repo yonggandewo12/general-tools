@@ -68,8 +68,8 @@ def read_excel_range(
 
 def write_data(
     filepath: str,
-    sheet_name: str | None,
-    data: list[list[Any]] | None,
+    sheet_name: str | None = None,
+    data: list[list[Any]] | None = None,
     start_cell: str = "A1",
 ) -> dict[str, str]:
     """将二维列表写入工作表，起始单元格默认 A1。工作表不存在则创建。"""
@@ -99,6 +99,12 @@ def write_data(
         raise DataError(str(e)) from e
 
 
+# 元数据读取的单元格硬上限：end_cell 给出超大范围（如 ZZ5000）时，
+# openpyxl 会物化整个矩形（每格带 validation），实测可达数百 MB stdout，
+# Node 侧字符串累积直接 OOM。超过上限截断并显式标记 truncated。
+MAX_METADATA_CELLS = 50_000
+
+
 def read_excel_range_with_metadata(
     filepath: str,
     sheet_name: str,
@@ -117,6 +123,14 @@ def read_excel_range_with_metadata(
                 return {"range": rng, "sheet_name": sheet_name, "cells": []}
             if preview_only:
                 er = min(er, sr + 9)
+            # 显式 end_cell 也须裁剪到真实数据边界
+            er = min(er, max(ws.max_row, sr))
+            ec = min(ec, max(ws.max_column, sc))
+            total_cells = (er - sr + 1) * (ec - sc + 1)
+            truncated = total_cells > MAX_METADATA_CELLS
+            if truncated:
+                er_full = er
+                er = sr - 1 + MAX_METADATA_CELLS // max(ec - sc + 1, 1)
             rng = f"{get_column_letter(sc)}{sr}:{get_column_letter(ec)}{er}"
             cells: list[dict[str, Any]] = []
             for r in range(sr, er + 1):
@@ -133,7 +147,16 @@ def read_excel_range_with_metadata(
                         v = get_data_validation_for_cell(ws, addr)
                         cell_data["validation"] = v if v else {"has_validation": False}
                     cells.append(cell_data)
-            return {"range": rng, "sheet_name": sheet_name, "cells": cells}
+            result: dict[str, Any] = {"range": rng, "sheet_name": sheet_name, "cells": cells}
+            if truncated:
+                result["truncated"] = True
+                result["warning"] = (
+                    f"Range contains {total_cells} cells; only the first {len(cells)} "
+                    f"(rows {sr}-{er}) were returned (limit {MAX_METADATA_CELLS}). "
+                    f"Request a narrower range (full range was {get_column_letter(sc)}{sr}:"
+                    f"{get_column_letter(ec)}{er_full})."
+                )
+            return result
     except (DataError, ValidationError):
         raise
     except Exception as e:

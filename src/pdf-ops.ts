@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 
 export interface PdfMergeResult {
@@ -43,8 +44,10 @@ export interface PdfCompressResult {
 
 /**
  * Parse a page range spec like "1-3,5,7-9" into 0-based page indices.
- * Ranges are 1-based, inclusive on both ends. Results are deduplicated,
- * sorted, and clamped to [0, totalPages-1].
+ * Ranges are 1-based, inclusive on both ends. Results are deduplicated and
+ * sorted. A range's END may exceed totalPages (clamped, so "1-9999" means
+ * "to the last page"), but a page/range START beyond totalPages is an error
+ * — silently clamping it would produce the wrong page.
  * Throws on invalid syntax (negative numbers, descending ranges, etc.).
  */
 export function parsePageRanges(spec: string, totalPages: number): number[] {
@@ -65,28 +68,47 @@ export function parsePageRanges(spec: string, totalPages: number): number[] {
 
     if (rangeMatch) {
       const start = parseInt(rangeMatch[1], 10);
-      const end = parseInt(rangeMatch[2], 10);
+      const end = Math.min(parseInt(rangeMatch[2], 10), totalPages);
       if (start < 1 || end < 1) {
         throw new Error(`Invalid pageRanges syntax: page numbers must be >= 1, got "${trimmed}"`);
       }
-      if (start > end) {
-        throw new Error(`Invalid pageRanges syntax: descending range "${trimmed}" (${start}>${end})`);
+      if (start > parseInt(rangeMatch[2], 10)) {
+        throw new Error(`Invalid pageRanges syntax: descending range "${trimmed}" (${rangeMatch[1]}>${rangeMatch[2]})`);
+      }
+      if (start > totalPages) {
+        throw new Error(`Invalid pageRanges: page ${start} out of range (PDF has ${totalPages} pages), got "${trimmed}"`);
       }
       for (let i = start; i <= end; i++) {
-        pages.add(Math.min(i - 1, totalPages - 1));
+        pages.add(i - 1);
       }
     } else if (singleMatch) {
       const page = parseInt(singleMatch[1], 10);
       if (page < 1) {
         throw new Error(`Invalid pageRanges syntax: page number must be >= 1, got "${trimmed}"`);
       }
-      pages.add(Math.min(page - 1, totalPages - 1));
+      if (page > totalPages) {
+        throw new Error(`Invalid pageRanges: page ${page} out of range (PDF has ${totalPages} pages)`);
+      }
+      pages.add(page - 1);
     } else {
       throw new Error(`Invalid pageRanges syntax: cannot parse "${trimmed}" in "${spec}"`);
     }
   }
 
   return [...pages].sort((a, b) => a - b);
+}
+
+/**
+ * pdf-lib cannot decrypt: with ignoreEncryption it keeps encrypted content
+ * but drops the /Encrypt dict on save, producing a silently corrupt output.
+ * Load then reject encrypted documents with an actionable message.
+ */
+async function loadDecrypted(bytes: Uint8Array): Promise<PDFDocument> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  if (doc.isEncrypted) {
+    throw new Error('PDF is encrypted. Decrypt it first (e.g. pdf_decrypt with the password) before this operation.');
+  }
+  return doc;
 }
 
 /**
@@ -112,7 +134,7 @@ export async function mergePdfs(
 
     for (const p of pdfPaths) {
       const bytes = await fs.promises.readFile(p);
-      const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const src = await loadDecrypted(bytes);
       const srcPages = src.getPageIndices();
       const pages = await out.copyPages(src, srcPages);
       for (const page of pages) {
@@ -180,7 +202,7 @@ export async function splitPdf(
     }
 
     const bytes = await fs.promises.readFile(pdfPath);
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const src = await loadDecrypted(bytes);
     const totalPages = src.getPageCount();
     const indices = parsePageRanges(pageRanges, totalPages);
     const ranges = buildContinuousRanges(indices);
@@ -242,7 +264,7 @@ export async function extractPages(
     }
 
     const bytes = await fs.promises.readFile(pdfPath);
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const src = await loadDecrypted(bytes);
     const totalPages = src.getPageCount();
     const indices = parsePageRanges(pageRanges, totalPages);
 
@@ -288,7 +310,7 @@ export async function compressPdf(
 
     const inputSize = (await fs.promises.stat(pdfPath)).size;
     const bytes = await fs.promises.readFile(pdfPath);
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const src = await loadDecrypted(bytes);
     const outBytes = await src.save({ useObjectStreams });
 
     const resolvedOutput = outputPath ? path.resolve(outputPath) : path.resolve(pdfPath);
@@ -297,13 +319,19 @@ export async function compressPdf(
       await fs.promises.mkdir(path.dirname(resolvedOutput), { recursive: true });
     }
     if (inPlace) {
-      // 原地覆盖：先写同目录临时文件再原子替换，避免写入中途失败损坏原文件
+      // 原地覆盖：先写同目录临时文件再原子替换，避免写入中途失败损坏原文件。
+      // randomUUID 防同进程并发压缩同一文件时 tmp 路径相撞。
       const tmp = path.join(
         path.dirname(resolvedOutput),
-        `.${path.basename(resolvedOutput)}.${process.pid}.tmp`,
+        `.${path.basename(resolvedOutput)}.${randomUUID()}.tmp`,
       );
-      await fs.promises.writeFile(tmp, outBytes);
-      await fs.promises.rename(tmp, resolvedOutput);
+      try {
+        await fs.promises.writeFile(tmp, outBytes);
+        await fs.promises.rename(tmp, resolvedOutput);
+      } catch (err) {
+        await fs.promises.rm(tmp, { force: true }).catch(() => {});
+        throw err;
+      }
     } else {
       await fs.promises.writeFile(resolvedOutput, outBytes);
     }

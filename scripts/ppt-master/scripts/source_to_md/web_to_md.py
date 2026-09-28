@@ -25,6 +25,7 @@ TLS fingerprint handling:
     If curl_cffi is unavailable on your platform, the Node.js counterpart
     (scripts/source_to_md/web_to_md.cjs) remains available as a fallback.
 """
+from __future__ import annotations
 
 import argparse
 import codecs

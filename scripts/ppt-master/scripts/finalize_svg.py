@@ -32,6 +32,7 @@ Processing options:
     flatten-text  - Convert <tspan> to independent <text> (for special renderers)
     fix-rounded   - Convert <rect rx="..."/> to <path> (for PPT shape conversion)
 """
+from __future__ import annotations
 
 import os
 import sys

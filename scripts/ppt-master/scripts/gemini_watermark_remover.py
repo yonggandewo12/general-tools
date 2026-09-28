@@ -21,6 +21,7 @@ Notes:
     - Automatically detects watermark size (48px or 96px)
     - Output file defaults to adding an _unwatermarked suffix
 """
+from __future__ import annotations
 
 import sys
 import argparse

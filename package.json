@@ -1,6 +1,6 @@
 {
   "name": "general-tools-mcp-server",
-  "version": "1.9.7",
+  "version": "1.9.8",
   "description": "MCP server for HTML/Markdown/PDF conversion, local OCR, PDF classification, PPT generation, and document-to-Markdown conversion",
   "type": "module",
   "bin": {

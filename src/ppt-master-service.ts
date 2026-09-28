@@ -125,12 +125,22 @@ export class PptMasterService {
         outputPath = path.resolve(match[1].trim());
       } else {
         // Fallback: look for the most recent .pptx in exports/
+        // （readdir 是字典序，必须按 mtime 取“最新”，否则会报告错误文件）
         const exportsDir = path.join(projectDir, 'exports');
         const pptxFiles = (await fs.readdir(exportsDir).catch(() => [])).filter((f) => f.endsWith('.pptx'));
         if (pptxFiles.length === 0) {
           throw new Error('svg_to_pptx succeeded but output path could not be determined');
         }
-        outputPath = path.join(exportsDir, pptxFiles[pptxFiles.length - 1]);
+        let newest = pptxFiles[0]!;
+        let newestMtime = -1;
+        for (const f of pptxFiles) {
+          const st = await fs.stat(path.join(exportsDir, f)).catch(() => null);
+          if (st && st.mtimeMs > newestMtime) {
+            newestMtime = st.mtimeMs;
+            newest = f;
+          }
+        }
+        outputPath = path.join(exportsDir, newest);
       }
     }
 

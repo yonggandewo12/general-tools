@@ -38,6 +38,7 @@ Usage:
     python3 scripts/pptx_animations.py --demo
     python3 scripts/pptx_animations.py --list
 """
+from __future__ import annotations
 
 import argparse
 from typing import Optional, Dict, Any

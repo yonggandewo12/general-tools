@@ -7,6 +7,7 @@ Configuration keys:
   REPLICATE_BASE_URL                        (optional)
   REPLICATE_MODEL                           (optional)
 """
+from __future__ import annotations
 
 import sys
 from pathlib import Path

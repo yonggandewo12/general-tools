@@ -7,6 +7,7 @@ Configuration keys:
   MINIMAX_BASE_URL  (optional)
   MINIMAX_MODEL     (optional)
 """
+from __future__ import annotations
 
 import sys
 from pathlib import Path

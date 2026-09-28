@@ -110,8 +110,11 @@ def duplicate_slide(
     transition: str | None = None,
 ) -> dict[str, Any]:
     """复制指定页 N 次（插到末尾），其余页保留；count=0 时仅原样输出。"""
+    deck = _full_deck_slides(pptxPath)
+    if slideIndex < 1 or slideIndex > len(deck):
+        raise ValueError(f"slideIndex {slideIndex} out of range (1..{len(deck)})")
     plan = _new_plan()
-    for idx in _full_deck_slides(pptxPath):
+    for idx in deck:
         plan["slides"].append({"source_slide": idx})
     for _ in range(max(0, count)):
         plan["slides"].append({"source_slide": slideIndex})
@@ -143,9 +146,14 @@ def set_transitions(
     slides: list[int] | None = None,
 ) -> dict[str, Any]:
     """设置指定页（或全部页）的转场效果；未指定页保留源转场。"""
-    targets = set(slides) if slides else set(_full_deck_slides(pptxPath))
+    deck = _full_deck_slides(pptxPath)
+    if slides is not None:
+        bad = [s for s in slides if s < 1 or s > len(deck)]
+        if bad:
+            raise ValueError(f"slides {bad} out of range (1..{len(deck)})")
+    targets = set(slides) if slides else set(deck)
     plan = _new_plan()
-    for idx in _full_deck_slides(pptxPath):
+    for idx in deck:
         slide: dict[str, Any] = {"source_slide": idx}
         if idx in targets:
             slide["transition"] = transition

@@ -8,7 +8,7 @@ from typing import Any
 from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule, IconSetRule
 from openpyxl.styles import Alignment, Border, Color, Font, PatternFill, Protection, Side
 
-from ._utils import edit_workbook, get_or_create_workbook, parse_cell_range, require_sheet, validate_cell_ref
+from ._utils import edit_workbook, get_or_create_workbook, parse_cell_range, require_sheet, resolve_path, save_workbook_atomic, validate_cell_ref
 from .exceptions import FormattingError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ def format_range(
             if conditional_format is not None:
                 _apply_conditional_format(ws, start_cell, end_cell, conditional_format)
 
-            wb.save(filepath)
+            save_workbook_atomic(wb, resolve_path(filepath))
         finally:
             try:
                 wb.close()

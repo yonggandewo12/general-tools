@@ -35,7 +35,6 @@ for _p in (_HERE, _SCRIPTS_DIR):
         sys.path.insert(0, str(_p))
 
 from console_encoding import configure_utf8_stdio  # noqa: E402
-from ppt_mcp import reader, writer  # noqa: E402
 
 configure_utf8_stdio()
 
@@ -57,20 +56,40 @@ if _PROTOCOL_FD is not None:
 
 logger = logging.getLogger("ppt_mcp.run")
 
-ACTIONS: dict[str, Callable[..., Any]] = {
+# reader/writer 顶层 import python-pptx / template_fill_pptx（其链上的
+# config.py 还含 3.9 不兼容的 PEP-604 注解），必须惰性加载：否则缺依赖时
+# --check/--list 直接以 traceback 失败，Node 侧 checkDeps 拿到原始 traceback
+# 而非 DEP_MISSING。
+_ACTION_NAMES = (
     # 读
-    "read_presentation": reader.read_presentation,
-    "read_slide_details": reader.read_slide_details,
-    "extract_text": reader.extract_text,
-    "to_images": reader.to_images,
+    "read_presentation",
+    "read_slide_details",
+    "extract_text",
+    "to_images",
     # 写
-    "apply_plan": writer.apply_plan,
-    "replace_text": writer.replace_text,
-    "replace_table_cells": writer.replace_table_cells,
-    "duplicate_slide": writer.duplicate_slide,
-    "add_notes": writer.add_notes,
-    "set_transitions": writer.set_transitions,
-}
+    "apply_plan",
+    "replace_text",
+    "replace_table_cells",
+    "duplicate_slide",
+    "add_notes",
+    "set_transitions",
+)
+
+
+def _build_actions() -> dict[str, Callable[..., Any]]:
+    from ppt_mcp import reader, writer
+    return {
+        "read_presentation": reader.read_presentation,
+        "read_slide_details": reader.read_slide_details,
+        "extract_text": reader.extract_text,
+        "to_images": reader.to_images,
+        "apply_plan": writer.apply_plan,
+        "replace_text": writer.replace_text,
+        "replace_table_cells": writer.replace_table_cells,
+        "duplicate_slide": writer.duplicate_slide,
+        "add_notes": writer.add_notes,
+        "set_transitions": writer.set_transitions,
+    }
 
 
 def _emit(obj: dict[str, Any]) -> None:
@@ -136,7 +155,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list:
-        _emit({"success": True, "data": {"actions": sorted(ACTIONS.keys())}})
+        _emit({"success": True, "data": {"actions": sorted(_ACTION_NAMES)}})
         return 0
 
     if args.check:
@@ -151,9 +170,13 @@ def main() -> int:
         _emit({"success": False, "error": "No --action provided", "code": "MISSING_ACTION"})
         return 1
 
-    fn = ACTIONS.get(args.action)
-    if fn is None:
-        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(ACTIONS.keys())})
+    if args.action not in _ACTION_NAMES:
+        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(_ACTION_NAMES)})
+        return 1
+    try:
+        fn = _build_actions()[args.action]
+    except Exception as e:
+        _emit({"success": False, "error": f"dependencies not available: {e}", "code": "DEP_MISSING", "error_type": e.__class__.__name__})
         return 1
 
     try:

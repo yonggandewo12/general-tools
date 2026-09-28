@@ -19,28 +19,64 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # 确保本脚本所在目录在 sys.path 最前，便于 `import docx_mcp`
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from docx_mcp.editor import ACTIONS, DocxMCPError, NotFoundError  # noqa: E402
+# 保护 stdout 的单行 JSON 协议（与 ppt_mcp/run.py 相同机制）
+try:
+    _PROTOCOL_FD: int | None = os.dup(sys.stdout.fileno())
+except (OSError, ValueError):
+    _PROTOCOL_FD = None
+if _PROTOCOL_FD is not None:
+    try:
+        os.dup2(2, 1)
+    except OSError:
+        os.close(_PROTOCOL_FD)
+        _PROTOCOL_FD = None
 
 logger = logging.getLogger("docx_mcp.run")
 
+# editor 模块顶层 import python-docx；必须惰性加载，否则缺依赖时
+# --check/--list 直接以 ModuleNotFoundError traceback 失败（协议失效）。
+_ACTION_NAMES = (
+    "read_document",
+    "list_tables",
+    "edit_paragraph",
+    "add_paragraph",
+    "insert_image",
+    "insert_table",
+    "change_style",
+    "set_document_title",
+    "available_styles",
+)
 
-# ────────────────────────────── 输出 ──────────────────────────────
+
+def _import_editor() -> Any:
+    import docx_mcp.editor  # noqa: F401
+    return docx_mcp.editor
+
 
 def _emit(obj: dict[str, Any]) -> None:
-    """单行 JSON 输出到 stdout。"""
-    sys.stdout.write(json.dumps(obj, default=str, ensure_ascii=False))
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    """单行 JSON 输出到协议 fd。"""
+    payload = json.dumps(obj, default=str, ensure_ascii=False) + "\n"
+    if _PROTOCOL_FD is None:
+        sys.stdout.write(payload)
+        sys.stdout.flush()
+        return
+    view = memoryview(payload.encode("utf-8"))
+    while view:
+        written = os.write(_PROTOCOL_FD, view)
+        if written <= 0:  # 不可达；防御性退出，避免死循环
+            raise OSError("stdout closed while writing protocol response")
+        view = view[written:]
 
 
 def _ok(result: Any) -> None:
@@ -51,8 +87,11 @@ def _ok(result: Any) -> None:
 
 
 def _fail(err: BaseException) -> None:
-    if isinstance(err, DocxMCPError):
-        _emit({"success": False, "error": str(err), "code": getattr(err, "code", "DOCX_ERROR"), "error_type": err.__class__.__name__})
+    # 领域错误自带 code（DocxMCPError 子类），其余归为 INTERNAL_ERROR。
+    # editor 为惰性导入，这里用属性探测代替 isinstance。
+    code = getattr(err, "code", None)
+    if code:
+        _emit({"success": False, "error": str(err), "code": code, "error_type": err.__class__.__name__})
     else:
         _emit({"success": False, "error": str(err), "code": "INTERNAL_ERROR", "error_type": err.__class__.__name__})
 
@@ -89,7 +128,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list:
-        _emit({"success": True, "data": {"actions": sorted(ACTIONS.keys())}})
+        _emit({"success": True, "data": {"actions": sorted(_ACTION_NAMES)}})
         return 0
 
     if args.check:
@@ -105,10 +144,15 @@ def main() -> int:
         _emit({"success": False, "error": "No --action provided", "code": "MISSING_ACTION"})
         return 1
 
-    fn = ACTIONS.get(args.action)
-    if fn is None:
-        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(ACTIONS.keys())})
+    if args.action not in _ACTION_NAMES:
+        _emit({"success": False, "error": f"Unknown action: {args.action}", "code": "UNKNOWN_ACTION", "available": sorted(_ACTION_NAMES)})
         return 1
+    try:
+        editor = _import_editor()
+    except Exception as e:
+        _emit({"success": False, "error": f"dependencies not available: {e}", "code": "DEP_MISSING", "error_type": e.__class__.__name__})
+        return 1
+    fn = editor.ACTIONS[args.action]
 
     try:
         params = _load_params(args)
@@ -120,7 +164,7 @@ def main() -> int:
         result = fn(**params)
         _ok(result)
         return 0
-    except (DocxMCPError, NotFoundError) as e:
+    except editor.DocxMCPError as e:  # NotFoundError 是其子类
         logger.warning("action %s failed: %s", args.action, e)
         _fail(e)
         return 2

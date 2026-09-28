@@ -9,6 +9,7 @@ Usage:
     python3 scripts/svg_quality_checker.py <directory>
     python3 scripts/svg_quality_checker.py --all examples
 """
+from __future__ import annotations
 
 import sys
 import re

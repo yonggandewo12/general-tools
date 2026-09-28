@@ -19,10 +19,19 @@ _CELL_REF_RE = re.compile(r"[A-Z]+[0-9]+(?::[A-Z]+[0-9]+)?")
 
 
 def validate_formula(formula: str) -> tuple[bool, str]:
-    """校验公式语法与安全性（括号配平、危险函数）。"""
-    if not formula.startswith("="):
-        return False, "Formula must start with '='"
-    body = formula[1:]
+    """校验公式语法与安全性（括号配平、危险函数）。
+
+    与 MCP schema 一致：接受带或不带前导 '='（apply_formula 同样接受两种，
+    此前 validate 拒绝裸公式导致 validate/apply 对同一输入结论相反）。
+    """
+    if formula.startswith("="):
+        body = formula[1:]
+    elif re.match(r"^[A-Za-z0-9\"\$\%\^\&\'\(\)\{\}\[\]\+\-\*/:,;._=@\s<>!#?~]", formula):
+        body = formula
+    else:
+        return False, "Formula must start with '=' or an expression character"
+    if not body.strip():
+        return False, "Empty formula"
     depth = 0
     for ch in body:
         if ch == "(":

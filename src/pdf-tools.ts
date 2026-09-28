@@ -54,7 +54,7 @@ export const PDF_TOOLS: Tool[] = [
         pdfPath: pdfPathProp,
         pageRanges: {
           type: 'string',
-          description: 'Page ranges, e.g. "1-3,5,7-9" (1-based, inclusive)',
+          description: 'Page ranges, e.g. "1-3,5,7-9" (1-based, inclusive). A range end may exceed the page count (clamped to the last page); a start/page beyond the page count is an error',
         },
         outputDir: {
           type: 'string',
@@ -78,7 +78,7 @@ export const PDF_TOOLS: Tool[] = [
         pdfPath: pdfPathProp,
         pageRanges: {
           type: 'string',
-          description: 'Page ranges, e.g. "1-3,5,7-9" (1-based, inclusive)',
+          description: 'Page ranges, e.g. "1-3,5,7-9" (1-based, inclusive). A range end may exceed the page count (clamped to the last page); a start/page beyond the page count is an error',
         },
         outputPath: {
           type: 'string',

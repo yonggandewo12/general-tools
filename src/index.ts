@@ -633,7 +633,11 @@ async function callTool(
  * process.exit(0) 永不执行、卡死 stdio MCP），随后杀掉仍在运行的 Python
  * 子进程（在途转换的 Python/Puppeteer/soffice），再退出。
  */
+let shuttingDown = false;
 async function shutdown(): Promise<void> {
+  // SIGINT/SIGTERM 与 stdin EOF 可能几乎同时触发；防止并发双重 cleanup
+  if (shuttingDown) return;
+  shuttingDown = true;
   const cleanupTimeout = new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, 5000);
     timer.unref();
@@ -773,6 +777,7 @@ class Md2PdfServer {
           }
           htmlOutputPath = path.resolve(htmlOutputPath);
 
+          await fs.mkdir(path.dirname(htmlOutputPath), { recursive: true });
           await fs.writeFile(htmlOutputPath, html, 'utf-8');
 
           return {

@@ -11,7 +11,20 @@ import { mermaidBundleSource, escapeInlineScript } from './mermaid-bundle.js';
 
 // ── Pattern constants ──────────────────────────────────────────────
 
-const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+// 目标段放宽为整段捕获：兼容 `![a](my image.png)`（CommonMark 允许无标题时
+// 目标含空格）与 `![a](<my image.png>)`；可选标题在 parseImageSrc 中剥离。
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\n]*)\)/g;
+
+/** 从图片语法目标段解析真实路径（剥 <...> 与尾部 "title"/'title'）。 */
+function parseImageSrc(raw: string): string {
+  const s = raw.trim();
+  if (s.startsWith('<')) {
+    const end = s.indexOf('>');
+    return end >= 0 ? s.slice(1, end) : s;
+  }
+  const titled = s.match(/^(.*?)(?:\s+(?:".*"|'.*'|`.*`))$/s);
+  return titled ? titled[1] : s;
+}
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const TOC_HEADING_RE = /^\s{0,3}#{2,6}\s+(?:目录|目錄|contents?|table of contents)\s*$/i;
 const TOC_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]+\]\(#[^)]+\)\s*$/;
@@ -58,8 +71,9 @@ async function embedImages(
   MD_IMAGE_RE.lastIndex = 0;
 
   while ((m = MD_IMAGE_RE.exec(text)) !== null) {
-    const [full, alt, src] = m;
-    if (isExternal(src)) continue;
+    const [full, alt, rawSrc] = m;
+    const src = parseImageSrc(rawSrc);
+    if (!src || isExternal(src)) continue;
     const imagePath = path.resolve(baseDir, src);
     matches.push({
       index: m.index,
@@ -110,7 +124,6 @@ async function embedImages(
 }
 
 function normalizeMarkdown(text: string): string {
-  text = text.replace(/｜/g, '|');
   const lines = text.split('\n');
   const normalized: string[] = [];
   let inFence = false;
@@ -123,6 +136,16 @@ function normalizeMarkdown(text: string): string {
       inFence = !inFence;
     }
 
+    // 全角竖线 → ASCII：仅正文。代码围栏内替换会篡改代码（CJK 文档
+    // 常用 ｜ 画表格/ASCII 图），还可能凭空造出 GFM 表格行；行内代码
+    // （`...`）同样不能替换。多反勾跨度与 <code> 标签未覆盖，属已知边界。
+    const current = inFence
+      ? line
+      : line
+          .split(/(`[^`]*`)/g)
+          .map((seg, i) => (i % 2 === 0 ? seg.replace(/｜/g, '|') : seg))
+          .join('');
+
     // If current line starts a list item and previous line is non-empty non-list → insert blank
     if (
       !inFence &&
@@ -134,7 +157,7 @@ function normalizeMarkdown(text: string): string {
       normalized.push('');
     }
 
-    normalized.push(line);
+    normalized.push(current);
 
     // If current line is a list item and next line is non-empty non-list non-indented → insert blank
     const nextLine = lines[i + 1];
@@ -285,6 +308,10 @@ function buildMermaidJs(source: string, pdfContentW?: number, pdfContentH?: numb
       // 默认标记为完成（无 mermaid 或加载失败时 PDF 不会卡住）
       window.__mermaidDone = true;
       if (!window.mermaid) return;
+      // 存在待渲染图时先置 false —— mermaid.run 是异步的，run() 返回 Promise
+      // 不代表完成；waitForFunction 必须等到 then/catch 回填 true，
+      // 否则初始值即 true，会在渲染中途截取 PDF（输出原始图源码）。
+      if (document.querySelector('.mermaid')) window.__mermaidDone = false;
       window.mermaid.initialize({
         securityLevel: 'loose',
         theme: 'base',
@@ -363,6 +390,9 @@ function buildMermaidJs(source: string, pdfContentW?: number, pdfContentH?: numb
       window.mermaid.run({ querySelector: '.mermaid' }).then(function() {
         scaleMermaidDiagrams();
         window.__mermaidDone = true;
+      }).catch(function() {
+        // 坏图/语法错误也要置位，否则 waitForFunction 只能等 30s 超时
+        window.__mermaidDone = true;
       });
     })();
   </script>
@@ -395,7 +425,7 @@ function buildJs(): string {
             node = node.nextSibling;
           }
           while (node && node.nodeType === Node.ELEMENT_NODE) {
-            const el = node as Element;
+            const el = node;
             if (el.tagName === 'H2') {
               el.classList.add('no-break-before');
               break;
@@ -421,7 +451,70 @@ function buildJs(): string {
 `;
 }
 
-// ── HTML template ──────────────────────────────────────────────────
+// ── Generated TOC ──────────────────────────────────────────────────
+
+/** 深度感知地为顶层 <table> 包裹 .table-scroll div，嵌套表格不重复包裹。 */
+function wrapTopLevelTables(body: string): string {
+  const marker = /<table[\s>]|<\/table\s*>/gi;
+  let out = '';
+  let i = 0;
+  let depth = 0;
+  let m: RegExpExecArray | null;
+  while ((m = marker.exec(body)) !== null) {
+    const isClose = m[0].startsWith('</');
+    if (!isClose && depth === 0) {
+      out += body.slice(i, m.index);
+      out += '<div class="table-scroll">';
+      i = m.index;
+    }
+    depth += isClose ? -1 : 1;
+    if (depth < 0) depth = 0;
+    if (isClose && depth === 0) {
+      out += body.slice(i, marker.lastIndex) + '</div>';
+      i = marker.lastIndex;
+    }
+  }
+  return out + body.slice(i);
+}
+
+interface TocItem { level: number; id: string; text: string }
+
+/** 从正文提取 h1-h4 生成嵌套目录 nav；不足 2 项时返回 null。
+ *  id 来自 slugify（仅合并空白，可含引号等字符），拼进 href 属性前必须转义；
+ *  text 是已实体编码的标题 innerHTML，可安全内联。 */
+function buildTocNav(body: string): string | null {
+  const items: TocItem[] = [];
+  for (const m of body.matchAll(/<h([1-4])\b[^>]*\bid="([^"]*)"[^>]*>([\s\S]*?)<\/h\1>/gi)) {
+    const text = m[3].replace(/<[^>]+>/g, '').trim();
+    if (text && m[2]) items.push({ level: Number(m[1]), id: m[2], text });
+  }
+  if (items.length < 2) return null;
+  const minLevel = Math.min(...items.map((i) => i.level));
+  let html = '<nav class="doc-toc" aria-label="目录">';
+  let prevDepth = 0;
+  for (let k = 0; k < items.length; k++) {
+    const depth = items[k].level - minLevel;
+    if (k === 0) {
+      html += '<ul>';
+    } else if (depth > prevDepth) {
+      // 层级跳跃 >1 时补空 <li> 维持合法嵌套（ul 必须落在 li 内）
+      while (prevDepth < depth) {
+        html += '<ul>';
+        if (depth - prevDepth > 1) html += '<li>';
+        prevDepth++;
+      }
+    } else {
+      html += '</li>';
+      while (prevDepth > depth) { html += '</ul></li>'; prevDepth--; }
+    }
+    html += `<li class="toc-l${items[k].level}"><a href="#${escapeHtml(items[k].id)}">${items[k].text}</a>`;
+    prevDepth = depth;
+  }
+  html += '</li>';
+  while (prevDepth > 0) { html += '</ul></li>'; prevDepth--; }
+  html += '</ul></nav>';
+  return html;
+}
 
 function buildHtml(
   title: string,
@@ -525,6 +618,19 @@ function buildHtml(
       border-radius: var(--radius);
       background: #fff;
     }
+    .doc-toc {
+      margin: 16px 0 28px;
+      padding: 14px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--soft);
+      font-size: 14px;
+      line-height: 1.9;
+    }
+    .doc-toc ul { margin: 0; padding-left: 18px; list-style: disc; }
+    .doc-toc > ul { padding-left: 0; list-style: none; }
+    .doc-toc a { color: var(--accent); text-decoration: none; }
+    .doc-toc a:hover { text-decoration: underline; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -690,8 +796,9 @@ export class MdConverter {
     const hrStripped = stripHrBeforeHeadings(body);
     body = hrStripped.body;
 
-    // 6. Wrap tables in .table-scroll
-    body = body.replace(/(<table[\s>][\s\S]*?<\/table>)/g, '<div class="table-scroll">$1</div>');
+    // 6. Wrap tables in .table-scroll（深度感知：非贪婪正则在嵌套表格上会
+    //    停在内层 </table>，把 div 插进外层表格破坏结构）
+    body = wrapTopLevelTables(body);
 
     // 7. Render mermaid blocks
     const { body: bodyWithMermaid, count: mermaidCount } = renderMermaidBlocks(body);
@@ -713,7 +820,8 @@ export class MdConverter {
       /(<a\s+[^>]*href=")#([^"]+)"/gi,
       (full, prefix, fragment) => {
         const match = headingIdLookup.get(normalizeAnchor(fragment));
-        return match ? `${prefix}#${match}"` : full;
+        // slugify 保留引号等字符，id 进 href 属性前须转义
+        return match ? `${prefix}#${escapeHtml(match)}"` : full;
       },
     );
 
@@ -739,10 +847,21 @@ export class MdConverter {
     }
 
     // 10. Build final HTML
-    const title = titleFromBody(fixedBody);
+    // 自动生成目录（schema 承诺 default: true；显式 toc:false 才关闭）。
+    // 插在首个 h1 之后（无 h1 则正文开头）；标题不足 2 个时不加。
+    let bodyWithToc = fixedBody;
+    if (options.toc !== false) {
+      const nav = buildTocNav(fixedBody);
+      if (nav) {
+        bodyWithToc = fixedBody.includes('<h1')
+          ? fixedBody.replace(/(<h1\b[\s\S]*?<\/h1>)/i, (h1) => `${h1}${nav}`)
+          : nav + fixedBody;
+      }
+    }
+    const title = titleFromBody(bodyWithToc);
     const fullHtml = buildHtml(
       title,
-      fixedBody,
+      bodyWithToc,
       options.withJs || false,
       mermaidSource,
       pdfContentW,
@@ -750,8 +869,8 @@ export class MdConverter {
     );
 
     // 11. Compute stats
-    const tableCount = (fixedBody.match(/<table[\s>]/g) || []).length;
-    const imageCount = (fixedBody.match(/<img[\s>]/g) || []).length;
+    const tableCount = (bodyWithToc.match(/<table[\s>]/g) || []).length;
+    const imageCount = (bodyWithToc.match(/<img[\s>]/g) || []).length;
 
     // 12. Non-fatal warnings: landscape suggestion based on embedded image aspect ratios
     const warnings: string[] = [];

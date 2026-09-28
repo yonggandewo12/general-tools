@@ -36,16 +36,25 @@ def _save_with_tmp(doc: Any, out: Path, **save_kwargs: Any) -> None:
         doc.close()
     except Exception:
         pass
-    os.replace(tmp, out)
+    try:
+        os.replace(tmp, out)
+    except BaseException:
+        # Windows 目标被占用时 replace 抛错，tmp 不能泄漏
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _encode_permissions(permissions: dict[str, bool] | None) -> int:
     """把权限 dict 编码为 PyMuPDF 权限位掩码。
 
     与 PDF 标准一致，默认禁止所有权限（值 0）。传入的 True 项按位开启。
+    未知键直接拒绝：拼错的键（如 "prnting"）此前被静默忽略，用户以为
+    已授予权限，实际输出 PDF 里并没有。
     """
     p = permissions or {}
-    perm_value = 0
     mapping = {
         "printing": fitz.PDF_PERM_PRINT,
         "modifying": fitz.PDF_PERM_MODIFY,
@@ -55,6 +64,12 @@ def _encode_permissions(permissions: dict[str, bool] | None) -> int:
         "contentAccessibility": fitz.PDF_PERM_ACCESSIBILITY,
         "documentAssembly": fitz.PDF_PERM_ASSEMBLE,
     }
+    unknown = [k for k in p if k not in mapping]
+    if unknown:
+        raise ValueError(
+            f"Unknown permission keys: {unknown}. Supported: {sorted(mapping)}"
+        )
+    perm_value = 0
     for name, mask in mapping.items():
         if p.get(name):
             perm_value |= mask
@@ -79,8 +94,11 @@ def encrypt_pdf(
     out = Path(outputPath).expanduser().resolve() if outputPath else src
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # 仅加密时不希望用户/所有者密码都为空（pdf-lib 场景），给出安全默认
+    # 仅加密时不希望用户/所有者密码都为空（pdf-lib 场景），给出安全默认。
+    # 随机 owner 密码必须返回给调用方，否则原地加密后文档永远无法再解密/
+    # 改权限（owner 密码是唯一凭证）。
     owner = ownerPassword or secrets.token_urlsafe(24)
+    owner_generated = ownerPassword is None
     user = userPassword or ""
 
     save_kwargs: dict[str, Any] = {
@@ -99,7 +117,14 @@ def encrypt_pdf(
         except Exception:
             pass
 
-    return {"outputPath": str(out), "permissions": permissions or {}}
+    result: dict[str, Any] = {"outputPath": str(out), "permissions": permissions or {}}
+    if owner_generated:
+        result["ownerPassword"] = owner
+        result["warning"] = (
+            "ownerPassword was auto-generated; store it now — without it the document "
+            "cannot be decrypted or have its permissions changed later."
+        )
+    return result
 
 
 def decrypt_pdf(

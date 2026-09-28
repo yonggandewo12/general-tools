@@ -38,10 +38,26 @@ def _open(path: str) -> DocumentObj:
 
 
 def _save(doc: DocumentObj, path: str) -> None:
-    """保存文档，确保父目录存在。"""
+    """保存文档：同目录临时文件 + os.replace 原子替换，父目录自动创建。
+
+    直接 doc.save(path) 在中途出错/磁盘满时会把用户文档写坏。
+    """
+    import os
+    import tempfile
+
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(p))
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".~docx-save-", suffix=".tmp")
+    os.close(fd)
+    try:
+        doc.save(tmp)
+        os.replace(tmp, str(p))
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _style_name(name: str | None) -> str | None:
@@ -169,8 +185,9 @@ def insert_image(path: str, image_path: str, index: int | None = None,
     if not img.exists():
         raise NotFoundError(f"Image not found: {image_path}")
 
-    width = Inches(width_inches) if width_inches else None
-    height = Inches(height_inches) if height_inches else None
+    # is not None：0 是合法显式值（如 width_inches: 0 表意图隐藏），不能被当缺省
+    width = Inches(width_inches) if width_inches is not None else None
+    height = Inches(height_inches) if height_inches is not None else None
 
     if index is not None:
         if index < 0 or index >= len(doc.paragraphs):

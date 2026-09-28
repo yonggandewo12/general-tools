@@ -102,6 +102,9 @@ let nativeModulePromise: Promise<PdfInspectorModule> | null = null;
 
 async function native(): Promise<PdfInspectorModule> {
   ensurePlatformSupported();
+  // 原生层在调用时读取 PDFIUM_LIB_PATH / ORT_DYLIB_PATH；所有走 native 的
+  // 路径（含加密分支、OCR Off 分支）都必须先就绪环境变量
+  ensureOcrRuntimeEnv();
   if (!nativeModulePromise) {
     nativeModulePromise = import('@firecrawl/pdf-inspector').catch((err) => {
       // 加载失败（如平台二进制缺失）不缓存，允许后续调用重试；
@@ -367,7 +370,6 @@ export async function processPdfWithOcrBuffer(
   buffer: Buffer,
   options: ProcessPdfWithOcrOptions = {},
 ): Promise<NormalizedPdfDocument> {
-  ensureOcrRuntimeEnv();
   const m = await native();
   try {
     const result: OcrPdfResult = await m.processPdfWithOcr(buffer, {

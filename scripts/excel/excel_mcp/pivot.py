@@ -137,6 +137,13 @@ def create_pivot_table(
                 "values": cleaned_values,
                 "aggregation": agg_func,
             },
+            **(
+                # columns 参与字段校验与回执，但生成的汇总表不含列轴展开；
+                # 静默忽略会让调用方误以为已实现列透视
+                {"warning": "columns axis is accepted but not expanded in the generated summary; only rows/values aggregation is applied"}
+                if columns
+                else {}
+            ),
         }
     except (ValidationError, PivotError):
         raise

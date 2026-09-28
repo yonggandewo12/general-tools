@@ -65,9 +65,13 @@ def create_chart_in_sheet(
                 f"Unsupported chart type: {chart_type}. Supported: {', '.join(_CHART_CLASSES)}"
             )
 
-        # 解析数据范围（可带 sheet! 前缀）
+        # 解析数据范围（可带 sheet! 前缀）。工作表名合法含 '!'，且 Excel
+        # 引用会带引号（'My Sheet'!A1:C4）：按最后一个 '!' 拆分并去引号。
         if "!" in data_range:
-            range_sheet, cell_range = data_range.split("!", 1)
+            range_sheet, cell_range = data_range.rsplit("!", 1)
+            range_sheet = range_sheet.strip()
+            if len(range_sheet) >= 2 and range_sheet[0] == "'" and range_sheet[-1] == "'":
+                range_sheet = range_sheet[1:-1]
         else:
             range_sheet, cell_range = sheet_name, data_range
         if ":" not in cell_range:

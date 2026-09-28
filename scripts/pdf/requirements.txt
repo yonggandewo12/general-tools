@@ -1,0 +1,3 @@
+# PDF MCP dependencies (encrypt/decrypt via PyMuPDF)
+# Install: pip install -r scripts/pdf/requirements.txt
+PyMuPDF>=1.24.0

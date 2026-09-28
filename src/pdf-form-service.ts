@@ -23,7 +23,7 @@ import {
   PDFHexString,
   PDFTextField,
 } from 'pdf-lib';
-import fontkit from '@pdf-lib/fontkit';
+import { embedFontBytesSupportingTtc } from './cjk-font.js';
 
 /** 文本是否含 WinAnsi 之外字符（中文等，需嵌入字体才能生成 appearance）。 */
 function needsCjk(text: string): boolean {
@@ -60,15 +60,10 @@ async function embedCjkFont(doc: PDFDocument): Promise<PDFFont> {
   if (!fontPath) {
     throw new Error('检测到中文字符，但未找到系统中文字体。请安装中文字体（如 Noto Sans CJK）后重试');
   }
-  doc.registerFontkit(fontkit);
   const fontBytes = await fs.readFile(fontPath);
-  // TTC 文件需先解析为 Collection 取出单个 face；TTF/OTF 直接 embedFont
-  if (path.extname(fontPath).toLowerCase() === '.ttc') {
-    const collection = (fontkit as unknown as { create: (data: Buffer) => { getFont: (index: number) => unknown } }).create(fontBytes);
-    const face = collection.getFont(0);
-    return doc.embedFont(face as ArrayBuffer, { subset: true });
-  }
-  return doc.embedFont(fontBytes, { subset: true });
+  // embedFontBytesSupportingTtc 内部注册 collection 感知的 fontkit，
+  // TTC（msyh/simsun/NotoSansCJK 等）与 TTF/OTF 均可嵌入
+  return embedFontBytesSupportingTtc(doc, fontBytes);
 }
 
 export interface PdfFormFieldInfo {

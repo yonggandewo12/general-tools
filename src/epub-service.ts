@@ -8,6 +8,7 @@
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 import MarkdownIt from 'markdown-it';
 import * as cheerio from 'cheerio';
@@ -147,6 +148,9 @@ export async function mdToEpub(options: EpubOptions): Promise<EpubResult> {
 
     const bookOptions: EpubGenOptions = {
       title,
+      // epub-gen 默认把工作文件写进 node_modules/epub-gen/tempDir ——
+      // 全局/只读安装（常见于 Windows 与容器）会直接失败，改指系统临时目录
+      tempDir: path.join(tmpdir(), 'general-tools-epub'),
       ...(options.author ? { author: options.author } : {}),
       ...(options.publisher ? { publisher: options.publisher } : {}),
       ...(options.cover ? { cover: options.cover } : {}),

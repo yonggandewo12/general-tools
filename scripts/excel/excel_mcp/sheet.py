@@ -6,7 +6,6 @@ import logging
 from copy import copy
 from typing import Any
 
-from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import column_index_from_string, get_column_letter
 
 from ._utils import (
@@ -171,21 +170,6 @@ def copy_range_operation(
         raise SheetError(str(e)) from e
 
 
-def _clear_range(ws, start_cell: str, end_cell: str | None = None) -> None:
-    sr, sc, er, ec = parse_cell_range(start_cell, end_cell)
-    if er is None or ec is None:
-        er, ec = sr, sc
-    for r in range(sr, er + 1):
-        for c in range(sc, ec + 1):
-            cell = ws.cell(row=r, column=c)
-            cell.value = None
-            cell.font = Font()
-            cell.border = Border()
-            cell.fill = PatternFill()
-            cell.number_format = "General"
-            cell.alignment = None
-
-
 def delete_range_operation(
     filepath: str,
     sheet_name: str,
@@ -202,11 +186,13 @@ def delete_range_operation(
         rng = range_to_str(sr, sc, er, ec)
         with edit_workbook(filepath) as wb:
             ws = require_sheet(wb, sheet_name)
-            _clear_range(ws, start_cell, end_cell)
+            # 删除即移除整行/整列并上移，无需先清区：清区会把范围内单元格的
+            # alignment 置 None（openpyxl 序列化出空 <alignment/> 样式索引），
+            # 且先清后删会误伤与范围无关的既有合并区。
             if shift_direction == "up":
-                ws.delete_rows(sr, er - sr + 1)
+                _row_col_op_preserving_merges(ws, "row", sr, er - sr + 1, inserting=False)
             else:
-                ws.delete_cols(sc, ec - sc + 1)
+                _row_col_op_preserving_merges(ws, "col", sc, ec - sc + 1, inserting=False)
         return {"message": f"Range {rng} deleted successfully"}
     except (SheetError, ValidationError):
         raise
@@ -224,12 +210,77 @@ def _validate_count(start: int, count: int, *, is_row: bool) -> None:
         raise ValidationError("Count must be 1 or greater")
 
 
+def _transform_interval(lo: int, hi: int, start: int, count: int, inserting: bool) -> tuple[int, int] | None:
+    """一维区间在插入/删除后的新位置；None 表示合并区完全落在删除带内、应移除。
+
+    删除的坐标映射：r < start 不动；start <= r <= start+count-1 消失；
+    r > start+count-1 上移 count。区间底部伸到删除带下方时整体上移 count，
+    不能只减去与本区间的 overlap（那是会算出多余行高的错误）。
+    """
+    if inserting:
+        new_lo = lo + count if lo >= start else lo
+        new_hi = hi + count if hi >= start else hi
+        return new_lo, new_hi
+    end = start + count - 1
+    if hi < start:
+        return lo, hi  # 完全在删除带上方：不动
+    if lo > end:
+        return lo - count, hi - count  # 完全在下方：整体上移
+    overlap = min(hi, end) - max(lo, start) + 1
+    if overlap >= hi - lo + 1:
+        return None  # 完全落入删除带
+    # 跨越删除带：上方幸存 [lo, start-1]；下方幸存映射到 [start, hi-count]
+    new_lo = lo if lo < start else start
+    new_hi = (hi - count) if hi > end else (start - 1)
+    return new_lo, new_hi
+
+
+def _row_col_op_preserving_merges(
+    ws, kind: str, start: int, count: int, *, inserting: bool
+) -> None:
+    """openpyxl 的 insert/delete_rows/cols 不会正确维护跨越操作点的
+    merged_cells.ranges，保存后产生重叠 merge 条目（Excel 报“已修复记录”）。
+    做法：先全部 unmerge 记下矩形，执行行列操作，再按新坐标重新 merge。"""
+    rects = [
+        (r.min_row, r.min_col, r.max_row, r.max_col)
+        for r in list(ws.merged_cells.ranges)
+    ]
+    for r in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(r))
+
+    if kind == "row":
+        (ws.insert_rows if inserting else ws.delete_rows)(start, count)
+    else:
+        (ws.insert_cols if inserting else ws.delete_cols)(start, count)
+
+    for min_row, min_col, max_row, max_col in rects:
+        if kind == "row":
+            t = _transform_interval(min_row, max_row, start, count, inserting=inserting)
+            if t is None:
+                continue  # 合并区整体被删除
+            new_min_row, new_max_row = t
+            new_min_col, new_max_col = min_col, max_col
+        else:
+            t = _transform_interval(min_col, max_col, start, count, inserting=inserting)
+            if t is None:
+                continue
+            new_min_col, new_max_col = t
+            new_min_row, new_max_row = min_row, max_row
+        if new_max_row > new_min_row or new_max_col > new_min_col:
+            ws.merge_cells(
+                start_row=new_min_row,
+                start_column=new_min_col,
+                end_row=new_max_row,
+                end_column=new_max_col,
+            )
+
+
 def insert_row(filepath: str, sheet_name: str, start_row: int, count: int = 1) -> dict[str, Any]:
     try:
         _validate_count(start_row, count, is_row=True)
         with edit_workbook(filepath) as wb:
             ws = require_sheet(wb, sheet_name)
-            ws.insert_rows(start_row, count)
+            _row_col_op_preserving_merges(ws, "row", start_row, count, inserting=True)
         return {"message": f"Inserted {count} row(s) starting at row {start_row} in sheet {sheet_name!r}"}
     except (SheetError, ValidationError):
         raise
@@ -243,7 +294,7 @@ def insert_cols(filepath: str, sheet_name: str, start_col: int, count: int = 1) 
         _validate_count(start_col, count, is_row=False)
         with edit_workbook(filepath) as wb:
             ws = require_sheet(wb, sheet_name)
-            ws.insert_cols(start_col, count)
+            _row_col_op_preserving_merges(ws, "col", start_col, count, inserting=True)
         return {"message": f"Inserted {count} column(s) starting at column {start_col} in sheet {sheet_name!r}"}
     except (SheetError, ValidationError):
         raise
@@ -259,7 +310,7 @@ def delete_rows(filepath: str, sheet_name: str, start_row: int, count: int = 1) 
             ws = require_sheet(wb, sheet_name)
             if start_row > ws.max_row:
                 raise ValidationError(f"Start row {start_row} exceeds worksheet bounds (max row: {ws.max_row})")
-            ws.delete_rows(start_row, count)
+            _row_col_op_preserving_merges(ws, "row", start_row, count, inserting=False)
         return {"message": f"Deleted {count} row(s) starting at row {start_row} in sheet {sheet_name!r}"}
     except (SheetError, ValidationError):
         raise
@@ -275,7 +326,7 @@ def delete_cols(filepath: str, sheet_name: str, start_col: int, count: int = 1) 
             ws = require_sheet(wb, sheet_name)
             if start_col > ws.max_column:
                 raise ValidationError(f"Start column {start_col} exceeds worksheet bounds (max column: {ws.max_column})")
-            ws.delete_cols(start_col, count)
+            _row_col_op_preserving_merges(ws, "col", start_col, count, inserting=False)
         return {"message": f"Deleted {count} column(s) starting at column {start_col} in sheet {sheet_name!r}"}
     except (SheetError, ValidationError):
         raise

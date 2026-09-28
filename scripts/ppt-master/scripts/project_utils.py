@@ -5,6 +5,7 @@ PPT Master - Project Utilities Module
 Provides common functions for project information parsing and validation,
 reusable by other tools.
 """
+from __future__ import annotations
 
 import argparse
 import re

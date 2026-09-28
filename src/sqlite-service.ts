@@ -57,7 +57,13 @@ async function openDatabase(dbPath: string, allowCreate = false): Promise<Sqlite
         '请重新执行 npm install 安装预编译二进制。',
     );
   }
-  return new Database(dbPath, { fileMustExist: !allowCreate });
+  // 查询/列表路径（allowCreate=false）必须以 readonly 打开：sqlite_query
+  // 文档承诺 SELECT-only，但 stmt.all() 可执行 INSERT/UPDATE/DELETE ... RETURNING
+  // 并真实修改数据库；readonly 让 SQLite 在引擎层直接拒绝写语句。
+  return new Database(dbPath, {
+    fileMustExist: !allowCreate,
+    readonly: !allowCreate,
+  });
 }
 
 function toRows(values: unknown[]): SqliteRow[] {

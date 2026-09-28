@@ -10,6 +10,7 @@ Usage:
     python3 scripts/batch_validate.py --all
     python3 scripts/batch_validate.py examples projects
 """
+from __future__ import annotations
 
 import argparse
 import sys

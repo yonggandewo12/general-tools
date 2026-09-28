@@ -22,6 +22,7 @@ Notes:
     - Split documents do not include the level-1 heading
     - Split document names match the SVG filenames with .md extension
 """
+from __future__ import annotations
 
 import sys
 import argparse

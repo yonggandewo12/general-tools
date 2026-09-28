@@ -58,7 +58,8 @@ function escapeHtml(s: string): string {
 
 export class DocxService {
   private pythonRunner: PythonScriptRunner | null = null;
-  private pythonRunning = false;
+  private runningEdits = new Set<string>();
+  private docxDepsChecked = false;
 
   /** 懒创建 Python 子进程 runner（避免启动时同步 probe Python）。 */
   private getRunner(): PythonScriptRunner {
@@ -66,6 +67,27 @@ export class DocxService {
       this.pythonRunner = new PythonScriptRunner();
     }
     return this.pythonRunner;
+  }
+
+  /** 调 docx/run.py --check：python-docx 缺失时给出干净错误而非 traceback。 */
+  private async checkEditDeps(): Promise<void> {
+    if (this.docxDepsChecked) return;
+    const runner = this.getRunner();
+    const result = await runner.runPath(DOCX_RUN_PY, ['--check'], { timeoutMs: 15000 });
+    if (result.exitCode !== 0) {
+      let detail = result.stderr.slice(0, 300);
+      try {
+        const parsed = JSON.parse(result.stdout.trim()) as { error?: string };
+        if (parsed.error) detail = parsed.error;
+      } catch {
+        /* keep stderr */
+      }
+      throw new Error(
+        `DOCX edit dependencies not ready: ${detail}. ` +
+          `Install python-docx (pip install python-docx) or the platform runtime package.`,
+      );
+    }
+    this.docxDepsChecked = true;
   }
 
   // ─────────────────────── 生成新文档 ───────────────────────
@@ -182,13 +204,18 @@ ${content}
    * insert_table / change_style / set_document_title / available_styles。
    */
   async editDocument(action: string, params: Record<string, unknown>): Promise<DocxEditResult> {
-    if (this.pythonRunning) {
-      return { success: false, error: 'DOCX edit already in progress' };
+    // 互斥粒度 = 单个文件：每次编辑是独立子进程，跨文件本可并行；
+    // 仅同文件并发会读-改-写互相覆盖，需要拒绝。
+    const filePath = typeof params.path === 'string' ? path.resolve(params.path) : undefined;
+    const busy = filePath && this.runningEdits.has(filePath);
+    if (busy) {
+      return { success: false, error: `DOCX edit already in progress for ${filePath}` };
     }
-    this.pythonRunning = true;
+    if (filePath) this.runningEdits.add(filePath);
     try {
       const runner = this.getRunner();
       await runner.checkPython();
+      await this.checkEditDeps();
       // 走 stdin 传输 params，规避命令行参数长度限制（Windows ~32KB），与 excel-service 一致
       const result = await runner.runPath(DOCX_RUN_PY, ['--action', action], {
         timeoutMs: 60000,
@@ -214,7 +241,7 @@ ${content}
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     } finally {
-      this.pythonRunning = false;
+      if (filePath) this.runningEdits.delete(filePath);
     }
   }
 

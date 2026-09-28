@@ -23,7 +23,10 @@ export async function readMarkdownSource(
   if (mdPath) {
     const mdFilePath = path.resolve(mdPath);
     await fs.access(mdFilePath);
-    return { mdText: await fs.readFile(mdFilePath, 'utf-8'), baseDir: path.dirname(mdFilePath) };
+    // 剥离 UTF-8 BOM（Windows 编辑器常见）：\ufeff 会渲染进正文并破坏
+    // epub 首标题/内联目录探测逻辑
+    const raw = await fs.readFile(mdFilePath, 'utf-8');
+    return { mdText: raw.replace(/^\uFEFF/, ''), baseDir: path.dirname(mdFilePath) };
   }
-  return { mdText: mdContent!, baseDir: undefined };
+  return { mdText: mdContent!.replace(/^\uFEFF/, ''), baseDir: undefined };
 }

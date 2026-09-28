@@ -512,11 +512,22 @@ export class PdfConverter {
   }
 
   /**
-   * Close browser and cleanup resources
+   * Close browser and cleanup resources.
+   * 若 launch 在途（browserPromise 未 settle），须等它完成再关闭，
+   * 否则 Chromium 成为孤儿进程、stdio 退出被挂住。
    */
   async cleanup(): Promise<void> {
+    const pending = this.browserPromise;
+    this.browserPromise = null;
+    if (pending) {
+      try {
+        this.browser = await pending;
+      } catch {
+        this.browser = null;
+      }
+    }
     if (this.browser) {
-      await this.browser.close();
+      await this.browser.close().catch(() => {});
       this.browser = null;
     }
   }

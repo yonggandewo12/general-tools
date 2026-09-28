@@ -216,11 +216,18 @@ def image_rotate(
 
     img = _open(p)
     try:
-        if fixExif:
-            img = ImageOps.exif_transpose(img)
-        rotated = img.rotate(float(degrees), expand=expand, resample=Image.BICUBIC)
-        rotated.save(out)
-        return {"outputPath": str(out), "width": rotated.width, "height": rotated.height}
+        # exif_transpose 可能返回原图对象（无 EXIF 时）；直接重绑定变量会让
+        # finally 只关到副本，原始文件句柄在 Windows 上锁死源文件直到进程退出
+        base = ImageOps.exif_transpose(img) if fixExif else img
+        try:
+            rotated = base.rotate(float(degrees), expand=expand, resample=Image.BICUBIC)
+            rotated.save(out)
+            result = {"outputPath": str(out), "width": rotated.width, "height": rotated.height}
+            rotated.close()
+            return result
+        finally:
+            if base is not img:
+                base.close()
     finally:
         img.close()
 
@@ -304,12 +311,16 @@ def image_watermark(
                 x, y = _anchor(base.size, (tw, th), position, margin)
                 draw.text((x, y), text, font=font, fill=fill)
         else:
-            wm = _open(_resolve_path(textImage or "")).convert("RGBA")
-            # 等比缩放到主图 1/4
-            scale = 0.25
-            wm = wm.resize((max(1, int(wm.width * scale)), max(1, int(wm.height * scale))), Image.LANCZOS)
-            x, y = _anchor(base.size, wm.size, position, margin)
-            overlay.paste(wm, (x, y), wm)
+            wm_src = _open(_resolve_path(textImage or ""))
+            try:
+                wm = wm_src.convert("RGBA")
+                # 等比缩放到主图 1/4
+                scale = 0.25
+                wm = wm.resize((max(1, int(wm.width * scale)), max(1, int(wm.height * scale))), Image.LANCZOS)
+                x, y = _anchor(base.size, wm.size, position, margin)
+                overlay.paste(wm, (x, y), wm)
+            finally:
+                wm_src.close()
 
         composed = Image.alpha_composite(base, overlay)
         if composed.mode == "RGBA":

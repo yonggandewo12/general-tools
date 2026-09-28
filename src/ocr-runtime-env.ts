@@ -97,10 +97,11 @@ let resolved = false;
 /**
  * 确保 OCR 运行时环境变量就绪（幂等、显式配置优先、best-effort 静默）。
  * 在每次走 OCR 的 `processPdfWithOcr` 调用前执行。
+ * 契约：成功解析才缓存；定位失败/抛错不缓存，下次调用可重试（例如模型目录
+ * 尚未就绪的首次调用竞态）。
  */
 export function ensureOcrRuntimeEnv(): void {
   if (resolved) return;
-  resolved = true;
   try {
     if (!process.env.PDFIUM_LIB_PATH) {
       const dir = locatePdfiumDir();
@@ -110,7 +111,11 @@ export function ensureOcrRuntimeEnv(): void {
       const dylib = locateOrtDylib();
       if (dylib) process.env.ORT_DYLIB_PATH = dylib;
     }
+    // 两个变量都已就绪才缓存成功；否则保持未解析状态供后续重试
+    if (process.env.PDFIUM_LIB_PATH && process.env.ORT_DYLIB_PATH) {
+      resolved = true;
+    }
   } catch {
-    // npm 包缺失或目录结构异常：保持变量未设置，走回退路径
+    // npm 包缺失或目录结构异常：保持变量未设置，走回退路径，下次重试
   }
 }
