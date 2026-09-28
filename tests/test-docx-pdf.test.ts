@@ -293,8 +293,10 @@ describe('DOCX 生成（纯 JS docx 包）', () => {
     // 内联样式：粗体片段与等宽码片段
     expect(xml).toMatch(/<w:b\/>[\s\S]*?粗体/);
     expect(xml).toMatch(/Consolas[\s\S]*?码/);
-    // 显式底纹精确一次（未被表头默认灰覆盖或重复）
-    expect((xml.match(/<w:shd w:fill="FFEE00"\/>/g) ?? []).length).toBe(1);
+    // 显式底纹精确一次（未被表头默认灰覆盖或重复）。
+    // 属性序容忍：docx 9.8.0 起 shd 附带 w:val="clear"（合法 OOXML），
+    // CI 无锁安装可能解析到任一 9.x，断言只锚定 fill。
+    expect((xml.match(/<w:shd[^>]*w:fill="FFEE00"[^>]*\/>/g) ?? []).length).toBe(1);
     // 背景色不应再被重复应用为文字高亮
     expect(xml).not.toMatch(/<w:highlight w:val="yellow"\/>/);
     await fs.rm(dir, { recursive: true, force: true });
@@ -455,7 +457,7 @@ describe('DOCX 生成（纯 JS docx 包）', () => {
     expect((xml.match(/<w:vMerge w:val="restart"\/>/g) ?? []).length).toBe(1);
     expect((xml.match(/<w:vMerge w:val="continue"\/>/g) ?? []).length).toBe(2);
     expect((xml.match(/<w:gridSpan w:val="5"\/>/g) ?? []).length).toBe(1);
-    expect(xml).toMatch(/<w:shd w:fill="EEEEEE"\/>/);
+    expect(xml).toMatch(/<w:shd[^>]*w:fill="EEEEEE"/);
     expect((xml.match(/<w:br\/>/g) ?? []).length).toBe(1);
     expect(xml).toMatch(/<w:b\/>[\s\S]*?项目名称/);
     // 标题行是真表头 → 跨页重复；数据行不是
@@ -661,8 +663,14 @@ describe('PDF 后处理（pdf-lib）', () => {
     const pdf = path.join(dir, 'cn.pdf');
     await fs.writeFile(pdf, MINI_PDF);
     const r = await pdfPostProcessor.addWatermark(pdf, { watermarkText: '机密文件' });
-    // 中文字体嵌入失败也应回退而非崩溃（无中文字体时跳过绘制，不抛 WinAnsi 错误）
-    expect(r.success).toBe(true);
+    // v1.9.8 起行为：有系统中文字体 → 成功嵌入；无字体（如裸 ubuntu CI）→
+    // 显式失败并给出字体指引，不再谎报成功。两种都不得崩溃。
+    if (r.success) {
+      const after = await fs.readFile(pdf);
+      expect(after.length).toBeGreaterThan(MINI_PDF.length);
+    } else {
+      expect(r.error).toMatch(/font/i);
+    }
     await fs.rm(dir, { recursive: true, force: true });
   }, 30000);
 
