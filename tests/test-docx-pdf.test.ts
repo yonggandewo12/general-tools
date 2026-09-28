@@ -219,6 +219,251 @@ describe('DOCX 生成（纯 JS docx 包）', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('convertHtmlToDocx 表格支持 colspan/rowspan 合并', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'merge.docx');
+    // 模拟合并表单：标题行横跨 4 列，左侧标签纵跨 3 行
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table>' +
+        '<tr><th colspan="4">标题</th></tr>' +
+        '<tr><td rowspan="3">标签</td><td>a1</td><td>a2</td><td>a3</td></tr>' +
+        '<tr><td>b1</td><td>b2</td><td>b3</td></tr>' +
+        '<tr><td colspan="3">c1-3</td></tr>' +
+        '</table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    // 横向合并 → gridSpan
+    expect(xml).toMatch(/<w:gridSpan w:val="4"\/>/);
+    expect(xml).toMatch(/<w:gridSpan w:val="3"\/>/);
+    // 纵向合并 → vMerge restart + continue（docx 自动生成 2 个 continue）
+    expect((xml.match(/<w:vMerge w:val="restart"\/>/g) ?? []).length).toBe(1);
+    expect((xml.match(/<w:vMerge w:val="continue"\/>/g) ?? []).length).toBe(2);
+    // 网格为 4 列
+    expect((xml.match(/<w:gridCol/g) ?? []).length).toBe(4);
+    // 每行单元格数 = 4 - 被合并覆盖：row2/3 有 4 个（含 continue），row4 有 2 个（continue 1 + gridSpan 1）
+    expect(xml).toContain('标题');
+    expect(xml).toContain('标签');
+    expect(xml).toContain('c1-3');
+    // 内容不丢失：所有文本恰好出现一次
+    for (const t of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3']) expect((xml.match(new RegExp(`>${t}<`, 'g')) ?? []).length).toBe(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 表格列宽（colgroup 与单元格 width）按比例落到网格', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'colwidth.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table><colgroup><col width="200"/><col width="600"/></colgroup>' +
+        '<tr><td>窄</td><td>宽</td></tr><tr><td>x</td><td>y</td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    const cols = [...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    expect(cols.length).toBe(2);
+    // 200:600 → 1:3 比例（允许取整误差）
+    expect(cols[1] / cols[0]).toBeCloseTo(3, 0);
+    // 网格总宽 = 页面可用宽 9360 DXA
+    expect(cols[0] + cols[1]).toBe(9360);
+    // 单元格宽度与网格列一致
+    const tcw = [...xml.matchAll(/<w:tcW w:type="dxa" w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    expect(tcw.slice(0, 2)).toEqual(cols);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 表格单元格底纹/内联样式/对齐/valign 保留', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'cell-style.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table>' +
+        '<tr><td style="background-color: #ffee00; text-align: center" valign="middle">底纹<strong>粗体</strong><code>码</code></td><td>普通</td></tr>' +
+        '</table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    // 单元格底纹
+    expect(xml).toMatch(/<w:shd[^>]*w:fill="FFEE00"/);
+    // 段落居中
+    expect(xml).toMatch(/<w:jc w:val="center"\/>[\s\S]*?底纹/);
+    // 垂直居中
+    expect(xml).toMatch(/<w:vAlign w:val="center"\/>/);
+    // 内联样式：粗体片段与等宽码片段
+    expect(xml).toMatch(/<w:b\/>[\s\S]*?粗体/);
+    expect(xml).toMatch(/Consolas[\s\S]*?码/);
+    // 显式底纹精确一次（未被表头默认灰覆盖或重复）
+    expect((xml.match(/<w:shd w:fill="FFEE00"\/>/g) ?? []).length).toBe(1);
+    // 背景色不应再被重复应用为文字高亮
+    expect(xml).not.toMatch(/<w:highlight w:val="yellow"\/>/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 表格百分比列宽与 px 混用时比例正确', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'pctwidth.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table><colgroup><col width="25%"/><col width="75%"/></colgroup>' +
+        '<tr><td>a</td><td>b</td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    const cols = [...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    expect(cols.length).toBe(2);
+    expect(cols[1] / cols[0]).toBeCloseTo(3, 1); // 25% : 75% = 1 : 3
+    expect(cols[0] + cols[1]).toBe(9360);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 畸形表格（rowspan 越界/未闭合/空单元格）不崩溃且网格矩形成立', async () => {
+    const dir = await tmp();
+    const cases: Array<[string, string, string[]]> = [
+      ['rowspan 超出实际行数', '<table><tr><td rowspan="9">长</td><td>x</td></tr><tr><td>y</td></tr></table>', ['长', 'x', 'y']],
+      ['未闭合单元格', '<table><tr><td>甲<td>乙</tr><tr><td>丙</td><td>丁</td></tr></table>', ['甲', '乙', '丙', '丁']],
+      ['colspan 超过列数', '<table><tr><td>a</td><td>b</td></tr><tr><td colspan="9">宽</td></tr></table>', ['a', 'b', '宽']],
+      ['空单元格', '<table><tr><td></td><td> </td></tr><tr><td>实</td><td>值</td></tr></table>', ['实', '值']],
+      ['col 数多于实际列', '<table><colgroup><col width="100"/><col width="100"/><col width="100"/></colgroup><tr><td>p</td><td>q</td></tr></table>', ['p', 'q']],
+      ['非法 colspan 值', '<table><tr><td colspan="abc">坏</td><td>值</td></tr></table>', ['坏', '值']],
+    ];
+    for (const [i, [label, html, texts]] of cases.entries()) {
+      const out = path.join(dir, `m${i}.docx`);
+      const r = await getDocxService().convertHtmlToDocx(html, out);
+      expect(r.success, `${label}: ${r.error}`).toBe(true);
+      const xml = await docxText(out);
+      expect(xml, label).not.toMatch(/<text[ >]/);
+      for (const t of texts) expect(xml, `${label} 缺 ${t}`).toContain(t);
+      // 每行 gridSpan 累加必须等于网格列数（Word 打开不错位的硬条件）
+      const cols = (xml.match(/<w:gridCol/g) ?? []).length;
+      const rowSums = [...xml.matchAll(/<w:tr>([\s\S]*?)<\/w:tr>/g)].map((m) => {
+        const cells = (m[1].match(/<w:tc>/g) ?? []).length;
+        const spans = [...m[1].matchAll(/<w:gridSpan w:val="(\d+)"\/>/g)].map((s) => Number(s[1]));
+        return spans.reduce((a, b) => a + b, 0) + (cells - spans.length);
+      });
+      expect(rowSums.length, label).toBeGreaterThan(0);
+      expect(rowSums, label).toEqual(rowSums.map(() => cols));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 表格单元格内嵌图片产出 ImageRun', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'cell-img.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      `<table><tr><td>图：<img src="data:image/png;base64,${MINI_PNG.toString('base64')}" /></td><td>文</td></tr></table>`,
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect(xml).toMatch(/<w:drawing>/);
+    expect(xml).toContain('图：');
+    const zip = await JSZip.loadAsync(await fs.readFile(out));
+    const media = Object.keys(zip.files).filter((n) => n.startsWith('word/media/') && !n.endsWith('/'));
+    expect(media.length).toBe(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 嵌套表格的 colgroup 不污染外层列宽', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'nested-colgroup.docx');
+    // 外层未声明列宽（应 1:1 均分）；内层表自带极端比例 10:810
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table><tr><td>外1</td><td>外2</td></tr>' +
+        '<tr><td colspan="2"><table><colgroup><col width="10"/><col width="810"/></colgroup>' +
+        '<tr><td>内a</td><td>内b</td></tr></table></td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    const cols = [...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    // 内层表被压平，输出只有外层这一张表的两列网格，且保持 1:1 等宽
+    // （若内层 colgroup 的 10:810 泄漏，两列会变成悬殊比例）
+    expect(cols.length).toBe(2);
+    expect(cols[0]).toBe(cols[1]);
+    // 嵌套表内容压平但不粘连
+    expect(xml).toMatch(/内a\s+内b/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 仅真表头跨页重复，纯数据表首行不标记 tblHeader', async () => {
+    const dir = await tmp();
+    const withHead = path.join(dir, 'thead.docx');
+    const plain = path.join(dir, 'plain.docx');
+    const r1 = await getDocxService().convertHtmlToDocx(
+      '<table><thead><tr><th>列A</th><th>列B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>',
+      withHead,
+    );
+    const r2 = await getDocxService().convertHtmlToDocx(
+      '<table><tr><td>姓名</td><td>张三</td></tr><tr><td>性别</td><td>男</td></tr></table>',
+      plain,
+    );
+    expect(r1.success && r2.success, r1.error ?? r2.error).toBe(true);
+    // thead 首行 → <w:tblHeader/>（无 val 或 val=true）；纯 td 表 → 仅 val="false"
+    expect(await docxText(withHead)).toMatch(/<w:tblHeader\/>/);
+    expect(await docxText(plain)).not.toMatch(/<w:tblHeader\/>/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 超大 colspan 被夹取，不撑出畸形宽网格', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'huge-colspan.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<table><tr><td colspan="999">巨</td></tr><tr><td>x</td><td>y</td></tr></table>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    const cols = (xml.match(/<w:gridCol/g) ?? []).length;
+    expect(cols).toBeLessThanOrEqual(100);
+    // 仍是矩形网格：两行的宽度都等于列数
+    const sums = [...xml.matchAll(/<w:tr>([\s\S]*?)<\/w:tr>/g)].map((m) => {
+      const cells = (m[1].match(/<w:tc>/g) ?? []).length;
+      const spans = [...m[1].matchAll(/<w:gridSpan w:val="(\d+)"\/>/g)].map((s) => Number(s[1]));
+      return spans.reduce((a, b) => a + b, 0) + (cells - spans.length);
+    });
+    expect(sums).toEqual(sums.map(() => cols));
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 综合合并表单（标题跨行+纵跨标签列+子表头+底纹）结构成立', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'form.docx');
+    const form =
+      '<table border="1">' +
+      '<tr><th colspan="6">评选活动参评材料</th></tr>' +
+      '<tr><td width="90">姓名</td><td></td><td>性别</td><td></td><td>赛道</td><td></td></tr>' +
+      '<tr><td style="background-color:#eeeeee">目前岗位<br>工作内容</td><td colspan="5">填写区</td></tr>' +
+      '<tr><td rowspan="3">工作经验及成绩</td><td colspan="2">起止时间</td><td colspan="2"><strong>项目名称</strong></td><td>证明人</td></tr>' +
+      '<tr><td colspan="2">2024-2025</td><td colspan="2">项目A</td><td>张三</td></tr>' +
+      '<tr><td colspan="2"></td><td colspan="2"></td><td></td></tr>' +
+      '</table>';
+    const r = await getDocxService().convertHtmlToDocx(form, out);
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    const cols = (xml.match(/<w:gridCol/g) ?? []).length;
+    expect(cols).toBe(6);
+    // 每行（含 docx 自动插入的 vMerge 延续格）累加宽度必须等于网格列数
+    const sums = [...xml.matchAll(/<w:tr>([\s\S]*?)<\/w:tr>/g)].map((m) => {
+      const cells = (m[1].match(/<w:tc>/g) ?? []).length;
+      const spans = [...m[1].matchAll(/<w:gridSpan w:val="(\d+)"\/>/g)].map((s) => Number(s[1]));
+      return spans.reduce((a, b) => a + b, 0) + (cells - spans.length);
+    });
+    expect(sums.length).toBe(6);
+    expect(sums).toEqual(sums.map(() => 6));
+    // 合并、底纹、换行、加粗各自落地
+    expect((xml.match(/<w:vMerge w:val="restart"\/>/g) ?? []).length).toBe(1);
+    expect((xml.match(/<w:vMerge w:val="continue"\/>/g) ?? []).length).toBe(2);
+    expect((xml.match(/<w:gridSpan w:val="5"\/>/g) ?? []).length).toBe(1);
+    expect(xml).toMatch(/<w:shd w:fill="EEEEEE"\/>/);
+    expect((xml.match(/<w:br\/>/g) ?? []).length).toBe(1);
+    expect(xml).toMatch(/<w:b\/>[\s\S]*?项目名称/);
+    // 标题行是真表头 → 跨页重复；数据行不是
+    expect(xml).toMatch(/<w:tblHeader\/>/);
+    expect((xml.match(/<w:tblHeader\/>/g) ?? []).length).toBe(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('convertMdToDocx 内联 markdown（加粗/斜体/行内码/硬换行）落到合法 run', async () => {
     const dir = await tmp();
     const out = path.join(dir, 'md-inline.docx');
