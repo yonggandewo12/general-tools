@@ -18,6 +18,9 @@ interface StyleMapping {
   italics?: boolean;
   underline?: any;
   color?: string;
+  strike?: boolean;
+  /** 等宽/专用字体名；由标签（code → Consolas）写入，随嵌套内联继承 */
+  fontName?: string;
   highlight?: 'none' | 'black' | 'blue' | 'cyan' | 'darkBlue' | 'darkCyan' | 'darkGray' | 'darkGreen' | 'darkMagenta' | 'darkRed' | 'darkYellow' | 'green' | 'lightGray' | 'magenta' | 'red' | 'white' | 'yellow';
   alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
 }
@@ -328,25 +331,40 @@ export class HtmlToDocxConverter {
     const runs: any[] = [];
     const { html } = element;
     if (!html) {
-      return [this.createSimpleTextRun(element.text, baseStyle)];
+      return [this.createTextRun(element.text, baseStyle)];
     }
     const sanitizedHtml = this.sanitizeHtml(html);
     if (!sanitizedHtml.includes('<')) {
-      return [this.createSimpleTextRun(element.text, baseStyle)];
+      return [this.createTextRun(element.text, baseStyle)];
     }
     const $content = $('<div>' + sanitizedHtml + '</div>');
     if ($content.length === 0) {
-      return [this.createSimpleTextRun(element.text, baseStyle)];
+      return [this.createTextRun(element.text, baseStyle)];
     }
     for (const node of $content.contents().toArray()) {
       await this.processHtmlNode(node, baseStyle, runs, $);
     }
-    return runs.length > 0 ? runs : [this.createSimpleTextRun(element.text, baseStyle)];
+    return runs.length > 0 ? runs : [this.createTextRun(element.text, baseStyle)];
   }
 
-  private createSimpleTextRun(text: string, baseStyle: StyleMapping): any {
-    const { highlight, ...safeStyle } = baseStyle;
-    return new TextRun({ text, ...safeStyle, ...(highlight && { highlight }) });
+  /** 内联文本 → TextRun。
+   *
+   * 必须返回 TextRun 实例：Paragraph 的 children 若是普通对象，XML 序列化会按
+   * 对象的 `text` 字段产出非法 <text> 元素（WordprocessingML 无此标签），Word 会
+   * 静默丢弃该段文字，导致段落里的加粗/斜体/行内代码内容整体消失。
+   */
+  private createTextRun(text: string, style: StyleMapping): TextRun {
+    return new TextRun({
+      text,
+      bold: style.bold,
+      italics: style.italics,
+      size: style.size,
+      color: style.color,
+      strike: style.strike,
+      highlight: style.highlight,
+      underline: style.underline,
+      font: { name: style.fontName ?? FONT_FALLBACK },
+    });
   }
 
   private async processHtmlNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): Promise<void> {
@@ -364,29 +382,15 @@ export class HtmlToDocxConverter {
       const parts = text.split('\n');
       for (let i = 0; i < parts.length; i++) {
         if (parts[i] || i === 0) {
-          runs.push(this.nodeOptionsToRun({ text: parts[i], ...baseStyle }));
+          runs.push(this.createTextRun(parts[i], baseStyle));
         }
         if (i < parts.length - 1) {
           runs.push(new TextRun({ text: '', break: 1 }));
         }
       }
     } else if (text.trim() || text.includes(' ')) {
-      runs.push(this.nodeOptionsToRun({ text, ...baseStyle }));
+      runs.push(this.createTextRun(text, baseStyle));
     }
-  }
-
-  private nodeOptionsToRun(opts: any): TextRun {
-    const font = { name: 'Microsoft YaHei, SimHei, Arial, sans-serif' };
-    const { underline, text, bold, italics, size, color } = opts;
-    return new TextRun({
-      text,
-      bold,
-      italics,
-      size,
-      color,
-      font,
-      ...(underline && { underline }),
-    });
   }
 
   private async processTagNode(node: any, baseStyle: StyleMapping, runs: any[], $: any): Promise<void> {
@@ -397,11 +401,26 @@ export class HtmlToDocxConverter {
       if (run) runs.push(run);
       return;
     }
+    // <br> 没有文本，按文本处理会被整段丢弃，只留下换行本身
+    if (node.name === 'br') {
+      runs.push(new TextRun({ text: '', break: 1 }));
+      return;
+    }
     const tagStyle = this.applyTagStyles(node, baseStyle, $);
+    // 直接读 domhandler 的 children，避免为每个内联标签新建 cheerio 包装
+    const children: any[] = node.children ?? [];
+    // 含元素子节点时逐子展开：整段取 .text() 会把内层样式（strong 里的 em）压平成
+    // 一个 run，只保留外层样式。
+    if (children.some((child) => child.type === 'tag')) {
+      for (const child of children) {
+        await this.processHtmlNode(child, tagStyle, runs, $);
+      }
+      return;
+    }
     // cheerio 的 .text() 已完成 HTML 实体解码，无需再手动 decode
     const text = $(node).text();
     if (text.trim()) {
-      runs.push(this.createNodeOptions(text, tagStyle, node.name));
+      runs.push(this.createTextRun(text, tagStyle));
     }
   }
 
@@ -429,51 +448,52 @@ export class HtmlToDocxConverter {
         tagStyle.underline = { type: UnderlineType.SINGLE };
         break;
       case 'del':
+      case 's':
       case 'strike':
-        (tagStyle as any).strike = true;
+        tagStyle.strike = true;
         break;
       case 'code':
         tagStyle.size = 18;
         tagStyle.color = 'd73a49';
+        tagStyle.fontName = 'Consolas';
         break;
     }
   }
 
-  private createNodeOptions(text: string, tagStyle: StyleMapping, tagName: string): any {
-    const nodeOptions: any = {
-      text,
-      bold: tagStyle.bold,
-      italics: tagStyle.italics,
-      size: tagStyle.size,
-      color: tagStyle.color,
-    };
-    nodeOptions.font = tagName === 'code' ? { name: 'Consolas' } : { name: FONT_FALLBACK };
-    if (tagStyle.underline) {
-      nodeOptions.underline = tagStyle.underline;
-    }
-    if ((tagStyle as any).strike) {
-      nodeOptions.strike = (tagStyle as any).strike;
-    }
-    return nodeOptions;
-  }
-
-  private createListElements(element: ParsedElement, baseStyle: StyleMapping, $: any): any[] {
+  private async createListElements(element: ParsedElement, baseStyle: StyleMapping, $: any): Promise<any[]> {
     const paragraphs: any[] = [];
     const sanitizedHtml = this.sanitizeHtml(element.html);
-    const $list = $('<div>' + sanitizedHtml + '</div>');
-    $list.find('li').each((i: number, li: any) => {
-      const $li = $(li);
-      const text = $li.text();
-      const bullet = element.tag === 'ul' ? '• ' : `${i + 1}. `;
-      paragraphs.push(
-        new Paragraph({
-          children: [
-            new TextRun({ text: bullet + text, size: baseStyle.size, color: baseStyle.color }),
-          ],
-          indent: { left: 720 },
-        })
-      );
-    });
+    // 用原列表标签包裹（li 在 div 上下文会被 HTML5 解析器丢弃，同 createTableElements）
+    const $list = $(`<${element.tag}>${sanitizedHtml}</${element.tag}>`);
+    const processList = async (listNode: any, level: number): Promise<void> => {
+      const isOl = listNode.tagName?.toLowerCase() === 'ol';
+      let index = 0;
+      for (const li of $(listNode).children('li').toArray()) {
+        index++;
+        const bullet = isOl ? `${index}. ` : '• ';
+        const $li = $(li);
+        // 嵌套列表（ul/ol 为 li 直接子级，markdown-it 形态）从内联内容剥离，
+        // 由下方递归单独成段：否则嵌套项文字既内联进父段落、又重复输出自己的段落。
+        const $inline = $li.clone();
+        $inline.children('ul,ol').remove();
+        // 复用段落内联链路，保留列表项里的加粗/斜体/行内码样式
+        const inlineRuns = await this.createTextRuns(
+          { tag: 'li', text: $inline.text(), html: $inline.html(), styles: {} },
+          baseStyle,
+          $,
+        );
+        paragraphs.push(
+          new Paragraph({
+            children: [this.createTextRun(bullet, baseStyle), ...inlineRuns],
+            indent: { left: 720 + level * 360 },
+          })
+        );
+        for (const nested of $li.children('ul,ol').toArray()) {
+          await processList(nested, level + 1);
+        }
+      }
+    };
+    await processList($list.get(0), 0);
     return paragraphs;
   }
 

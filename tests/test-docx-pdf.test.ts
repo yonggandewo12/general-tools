@@ -133,6 +133,111 @@ describe('DOCX 生成（纯 JS docx 包）', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('convertHtmlToDocx 段落内联元素（strong/em/code）文字不丢失', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'inline.docx');
+    // 内联元素的 run 若不是 TextRun 实例，会被序列化成非法 <text> 元素，
+    // Word 解析时静默丢弃，段落里的加粗/斜体/行内码文字整体消失。
+    const r = await getDocxService().convertHtmlToDocx(
+      '<p>前段<strong>加粗字</strong>中段<em>斜体字</em><code>行内码</code>后段</p>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    for (const t of ['前段', '加粗字', '中段', '斜体字', '行内码', '后段']) {
+      expect(xml).toContain(t);
+    }
+    expect(xml).not.toMatch(/<text[ >]/);
+    // 每个内联片段都必须是带样式的合法 run
+    expect((xml.match(/<w:r>/g) ?? []).length).toBe(6);
+    expect(xml).toMatch(/<w:b\/>[\s\S]*?加粗字/);
+    expect(xml).toMatch(/<w:i\/>[\s\S]*?斜体字/);
+    expect(xml).toMatch(/Consolas[\s\S]*?行内码/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 嵌套内联保留双层样式，<br> 保留换行', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'nested-inline.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<p><strong>粗<em>粗斜</em>后</strong>行一<br>行二<s>删除</s><span style="background-color: yellow">高亮</span></p>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect(xml).not.toMatch(/<text[ >]/);
+    // strong 内的 em 不能压平成单层：该 run 同时含粗体与斜体
+    expect(xml).toMatch(/<w:b\/><w:bCs\/><w:i\/>[\s\S]*?粗斜/);
+    expect(xml).toMatch(/<w:strike\/>[\s\S]*?删除/);
+    expect(xml).toMatch(/<w:highlight[\s\S]*?高亮/);
+    // <br> 前不吞文本，且产出真实换行符
+    for (const t of ['粗', '粗斜', '后', '行一', '行二']) expect(xml).toContain(t);
+    expect((xml.match(/<w:br\/>/g) ?? []).length).toBe(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 列表项内联样式保留，深嵌套/大量内联不崩溃', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'list-inline.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<ul><li>甲<strong>乙</strong><code>丙</code></li><li>丁</li></ul>' +
+        `<p>${'<b>x'.repeat(300)}尾${'</b>'.repeat(300)}</p>` +
+        `<p>${Array.from({ length: 800 }, (_, i) => `<i>t${i}</i>`).join('')}</p>`,
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect(xml).not.toMatch(/<text[ >]/);
+    expect(xml).toMatch(/<w:b\/>[\s\S]*?乙/); // 列表项里的加粗不再是纯文本
+    expect(xml).toMatch(/Consolas[\s\S]*?丙/);
+    expect(xml).toContain('>• <'); // bullet 独立成 run
+    expect(xml).toContain('>甲<');
+    expect((xml.match(/•/g) ?? []).length).toBe(2); // 每项一个 bullet，无重复
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertHtmlToDocx 嵌套列表不重复输出子项，ol 每层独立编号', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'nested-list.docx');
+    const r = await getDocxService().convertHtmlToDocx(
+      '<ul><li>甲<ul><li>乙</li></ul></li><li>丁</li></ul>' +
+        '<ol><li>一<ol><li>内</li></ol></li><li>二</li></ol>',
+      out,
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    // 每个子项只出现一次：甲的段落不含"乙"，乙有自己的段落
+    expect((xml.match(/乙/g) ?? []).length).toBe(1);
+    expect((xml.match(/内/g) ?? []).length).toBe(1);
+    // ul 两个 bullet + ol 两层编号各一个 bullet
+    expect((xml.match(/•/g) ?? []).length).toBe(3);
+    expect(xml).toContain('1. ');
+    expect(xml).toContain('2. ');
+    // 嵌套层（乙）比顶层缩进更深
+    const indents = [...xml.matchAll(/<w:ind w:left="(\d+)"\/>/g)].map((m) => Number(m[1]));
+    expect(indents).toContain(1080);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('convertMdToDocx 内联 markdown（加粗/斜体/行内码/硬换行）落到合法 run', async () => {
+    const dir = await tmp();
+    const out = path.join(dir, 'md-inline.docx');
+    const r = await getDocxService().convertMdToDocx(
+      '正文**加粗**和*斜体*与`代码`<br>换行后\n',
+      undefined,
+      out,
+      {},
+    );
+    expect(r.success, r.error).toBe(true);
+    const xml = await docxText(out);
+    expect(xml).not.toMatch(/<text[ >]/);
+    expect(xml).toMatch(/<w:b\/>[\s\S]*?加粗/);
+    expect(xml).toMatch(/<w:i\/>[\s\S]*?斜体/);
+    expect(xml).toMatch(/Consolas[\s\S]*?代码/);
+    expect(xml).toMatch(/<w:br\/>[\s\S]*?换行后/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('convertMdToDocx 含 mermaid 且渲染失败时降级为源码，不崩溃', async () => {
     const dir = await tmp();
     const out = path.join(dir, 'mermaid-fallback.docx');
