@@ -42,6 +42,23 @@ async function loadAnydoc(): Promise<AnydocApi | null> {
   }
 }
 
+/**
+ * 汇总"OCR 已做过但结果仍疑似不完整"的页（含退化护栏命中的页），给出面向调用方
+ * 的一条通知；无此类页时返回 `undefined`。
+ *
+ * 页码为 1-indexed（与 `pdfOcr` 相关告警、NAPI 保持一致）。
+ */
+function hostedRecommendedNotice(doc: NormalizedPdfDocument): string | undefined {
+  const hostedPages = doc.pages
+    .filter((p) => p.ocrProvenance?.hostedRecommended)
+    .map((p) => p.pageIndex + 1);
+  if (hostedPages.length === 0) return undefined;
+  return (
+    `${hostedPages.length} page(s) look incomplete after local OCR ` +
+    `(1-indexed: ${hostedPages.join(', ')}); consider a hosted parser.`
+  );
+}
+
 export class PptMasterService {
   private runner: PythonScriptRunner;
 
@@ -258,18 +275,19 @@ export class PptMasterService {
     // renderVectorFigures/vectorFigureDpi 需 @napi-rs/canvas，目前未实现；
     // 在 MCP schema 中暴露但未消费会让调用方误以为生效。stderr 供 server 日志，
     // warnings 随结果回传，让 MCP 调用方能感知参数被忽略。
-    const warnings: string[] = [];
+    const notices: string[] = [];
     if (options.renderVectorFigures || options.vectorFigureDpi !== undefined) {
       const message =
         'renderVectorFigures/vectorFigureDpi are accepted but not implemented; ' +
         'PDF vector figure rendering requires @napi-rs/canvas and will be silently ignored.';
       console.warn(`[convert_to_markdown] ${message}`);
-      warnings.push(message);
+      notices.push(message);
     }
 
     const result = await this.convertToMarkdownInner(options, start);
-    if (warnings.length > 0 && result.success) {
-      return { ...result, warnings };
+    if (result.success) {
+      const merged = [...notices, ...(result.warnings ?? [])];
+      if (merged.length > 0) return { ...result, warnings: merged };
     }
     return result;
   }
@@ -549,13 +567,17 @@ export class PptMasterService {
       );
     }
 
-    const { markdown } = await this.extractPdfMarkdownWithOcr(pdfPath, options.pdfOcr ?? 'auto');
+    const { markdown, notices } = await this.extractPdfMarkdownWithOcr(
+      pdfPath,
+      options.pdfOcr ?? 'auto',
+    );
 
     await fs.writeFile(outputPath, markdown, 'utf-8');
 
     return {
       success: true,
       markdownPath: outputPath,
+      warnings: notices.length > 0 ? notices : undefined,
       details: { processingTime: Date.now() - start, sourceType: 'pdf' },
     };
   }
@@ -564,33 +586,35 @@ export class PptMasterService {
    * PDF→markdown 提取，按 pdfOcr 语义路由：
    * - 'auto'（默认）：先轻量分类；纯文本页走原生提取（零 OCR 开销），存在需 OCR
    *   页时本地 PP-OCRv6 选择性 OCR。OCR 运行时缺失/模型获取失败 → 回退原生提取
-   *   （扫描页文本可能不完整）并 console.warn，绝不因 OCR 失败整体失败。
+   *   （扫描页文本可能不完整）并告警，绝不因 OCR 失败整体失败。
    * - 'force'：跳过分类直接全页 OCR；失败直接抛错（显式请求不给静默降级）。
    * - 'off'：仅原生提取（历史行为）。
+   *
+   * `notices` 同时写 stderr 和随结果回传：生成的 .md 内容保持原样（不改写产物），
+   * 但调用方必须能在结果里看到"某页不可采信/已降级"的信号——MCP client 与普通
+   * 调用方看不到 stderr，只写日志等于静默降级。
    */
   private async extractPdfMarkdownWithOcr(
     pdfPath: string,
     pdfOcr: 'off' | 'auto' | 'force',
-  ): Promise<{ markdown: string }> {
+  ): Promise<{ markdown: string; notices: string[] }> {
+    const nativeMarkdown = async (): Promise<{ markdown: string; notices: string[] }> => ({
+      markdown: (await extractMarkdown(pdfPath)).markdown,
+      notices: [],
+    });
     if (pdfOcr === 'off') {
-      return extractMarkdown(pdfPath);
+      return nativeMarkdown();
     }
 
     // hostedRecommended 页面告警：OCR 已完成但结果仍疑似不完整
-    const warnHostedRecommended = (doc: NormalizedPdfDocument): void => {
-      const hostedPages = doc.pages
-        .filter((p) => p.ocrProvenance?.hostedRecommended)
-        .map((p) => p.pageIndex + 1);
-      if (hostedPages.length > 0) {
-        console.warn(
-          `[convert_to_markdown] ${hostedPages.length} page(s) look incomplete after local OCR ` +
-            `(1-indexed: ${hostedPages.join(', ')}); consider a hosted parser.`,
-        );
-      }
+    const markdownFrom = (doc: NormalizedPdfDocument): { markdown: string; notices: string[] } => {
+      const notice = hostedRecommendedNotice(doc);
+      if (notice) console.warn(`[convert_to_markdown] ${notice}`);
+      return {
+        markdown: doc.pages.map((p) => p.markdown).join('\n\n'),
+        notices: notice ? [notice] : [],
+      };
     };
-    const markdownFrom = (doc: NormalizedPdfDocument): { markdown: string } => ({
-      markdown: doc.pages.map((p) => p.markdown).join('\n\n'),
-    });
 
     if (pdfOcr === 'auto') {
       // 分类失败（损坏/加密等）→ 直接原生提取，由原生路径给出真实错误，
@@ -599,10 +623,10 @@ export class PptMasterService {
       try {
         ({ pagesNeedingOcr } = await classifyPdf(pdfPath));
       } catch {
-        return extractMarkdown(pdfPath);
+        return nativeMarkdown();
       }
       if (pagesNeedingOcr.length === 0) {
-        return extractMarkdown(pdfPath);
+        return nativeMarkdown();
       }
       console.warn(
         `[convert_to_markdown] PDF has ${pagesNeedingOcr.length} page(s) needing OCR ` +
@@ -610,21 +634,19 @@ export class PptMasterService {
       );
       try {
         const doc = await processPdfWithOcrFor(pdfPath, { mode: 'Auto' });
-        warnHostedRecommended(doc);
         return markdownFrom(doc);
       } catch (err) {
-        console.warn(
-          `[convert_to_markdown] Local OCR unavailable ` +
-            `(${err instanceof Error ? err.message : String(err)}); ` +
-            'falling back to native extraction, scanned-page text may be incomplete.',
-        );
-        return extractMarkdown(pdfPath);
+        const message =
+          `Local OCR unavailable (${err instanceof Error ? err.message : String(err)}); ` +
+          'falling back to native extraction, scanned-page text may be incomplete.';
+        console.warn(`[convert_to_markdown] ${message}`);
+        const { markdown } = await extractMarkdown(pdfPath);
+        return { markdown, notices: [message] };
       }
     }
 
     // force：显式请求不给静默降级，失败直接抛错。
     const doc = await processPdfWithOcrFor(pdfPath, { mode: 'Force' });
-    warnHostedRecommended(doc);
     return markdownFrom(doc);
   }
 }

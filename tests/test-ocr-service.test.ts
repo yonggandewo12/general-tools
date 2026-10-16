@@ -28,7 +28,15 @@ import { NormalizedPdfDocument } from '../src/pdf-inspector-types.js';
 const PNG_1X1_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-function docFrom(pages: Array<{ markdown: string; source?: string; ocrConfidence?: number }>): NormalizedPdfDocument {
+function docFrom(
+  pages: Array<{
+    markdown: string;
+    source?: string;
+    ocrConfidence?: number;
+    hostedRecommended?: boolean;
+    warnings?: string[];
+  }>,
+): NormalizedPdfDocument {
   return {
     pageCount: pages.length,
     pdfType: 'Scanned',
@@ -40,8 +48,8 @@ function docFrom(pages: Array<{ markdown: string; source?: string; ocrConfidence
       ocrProvenance: {
         source: (p.source ?? 'Ocr') as 'Native' | 'Ocr' | 'Fused',
         ocrConfidence: p.ocrConfidence,
-        hostedRecommended: false,
-        warnings: [],
+        hostedRecommended: p.hostedRecommended ?? false,
+        warnings: p.warnings ?? [],
       },
     })),
     pagesNeedingOcr: [],
@@ -134,6 +142,26 @@ describe('LocalOcrService', () => {
     const single = await service.recognize({ imageBase64: PNG_1X1_BASE64 });
     expect(single.text).not.toContain('[Page');
     expect(single.text).toBe('aaa');
+  });
+
+  it('surfaces degeneracy-guard warnings and the incomplete flag on the page result', async () => {
+    const zeros = '0'.repeat(30);
+    mockProcessPdfWithOcrBuffer.mockResolvedValue(
+      docFrom([
+        {
+          markdown: zeros,
+          hostedRecommended: true,
+          warnings: ['OCR output collapsed to 30 zero characters — a known silent-failure signature.'],
+        },
+      ]),
+    );
+    const result = await service.recognize({ imageBase64: PNG_1X1_BASE64 });
+
+    expect(result.success).toBe(true);
+    expect(result.pages?.[0].warnings[0]).toMatch(/silent-failure/);
+    expect(result.pages?.[0].hostedRecommended).toBe(true);
+    // 护栏是告警级的：退化文本仍原样返回，由调用方决定取舍
+    expect(result.text).toBe(zeros);
   });
 
   it('propagates engine failures as unsuccessful results', async () => {

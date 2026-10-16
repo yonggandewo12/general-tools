@@ -218,6 +218,14 @@ export ORT_DYLIB_PATH=/absolute/path/to/libonnxruntime.dylib  # Windows: onnxrun
 
 **平台支持：** macOS Apple Silicon 已实测全链路（含自动定位）；Linux x64/ARM64 与 Windows（官方 preview）运行时库随 npm 包分发。OCR 运行时缺失时工具**不会失败**——`extract_pdf_text`/`convert_to_markdown` 自动回退原生提取并附 warning，server 启动不受任何影响。
 
+**退化护栏：** 推理引擎可能"静默失败"——返回高置信度却是全零/单一重复字符的伪文本（部分 CPU 后端对中文的已知失败形态），此类结果无法从置信度看出。所有本地 OCR 页都经过一层输出签名检测：命中则在该页 `warnings` 追加说明并置 `hostedRecommended=true`。三个消费方的落地方式各自不同：
+
+- `extract_pdf_text`：`text` 模式逐页标注 `(Page N: OCR result looks incomplete — consider a hosted parser)`；`markdown` 模式在开头给一条聚合 HTML 注释（列出页码，不逐页插入）；`json` 模式保留完整 `warnings`。
+- `recognize_text`：逐页 `pages[].warnings` / `hostedRecommended`。
+- `convert_to_markdown`：通知进结果字段 `warnings[]`（stderr 同时打印）；写出的 `.md` 产物内容保持识别原文，不注入标记。
+
+检测**只做标注，不丢弃、不改写任何文本**，是否采信由调用方决定。阈值刻意保守：正常中文页、数字表格页、含长数字编号（如 `订单号 0000123456789`）的页在 Apple Silicon ONNX 后端实测零误报；但一页内容**本来就是一长串 0** 或同一字符重复时同样会命中——护栏是"该页不可直接采信"的告警，不是判定。因此无 warning 不等于识别完全正确，低置信度仍应复核。
+
 **离线环境：** 预先填好模型目录后设 `PDF_INSPECTOR_MODEL_CACHE`，或使用工具的 offline 选项禁止网络访问。
 
 ### 验证安装
@@ -362,7 +370,7 @@ Claude，识别 /path/to/scanned.pdf 全部页的文字
 
 > **输入优先级：** `image > url > base64 > pdf`。
 >
-> **输出：** `text`（全部文本，多页带 `[Page N]` 分隔）+ `pages[]`（逐页 `source`/`ocrConfidence`/`warnings` 来源信息）。
+> **输出：** `text`（全部文本，多页带 `[Page N]` 分隔）+ `pages[]`（逐页 `source`/`ocrConfidence`/`warnings`/`hostedRecommended`）。`warnings` 含退化护栏信号（全零/单字符支配/无内容）；命中时 `hostedRecommended=true`，表示该页文本不可采信但内容仍原样返回。详见「本地 OCR 部署」的**退化护栏**。
 >
 > **依赖：** OCR 运行时见「本地 OCR 部署」小节；运行时缺失时返回明确错误与安装指引（不影响其他工具）。
 
@@ -442,6 +450,7 @@ Claude，把 https://example.com 转为 Markdown
 > **内核与格式说明：**
 > - Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV 默认走 **anydoc** 内核（Rust 编译、Node 绑定，毫秒级转换），内嵌图片以 alt 文本保留、原始文件落到 `<输出名>_files/` 目录。
 > - PDF 走 `@firecrawl/pdf-inspector`（Rust + NAPI，多列阅读顺序、表格识别、毫秒级）；**不返回图片字节流**（`pdfImages` 选项对 PDF 是 no-op），需要原图请用 `screenshot_pdf` 出页面截图。
+> - PDF 的 OCR 质量通知（退化护栏命中页、OCR 运行时缺失回退）随结果 `warnings[]` 回传，stderr 同步打印；写出的 `.md` 产物保持识别原文，不注入标记。详见「本地 OCR 部署」的**退化护栏**。
 > - 网页 URL 走 Python 抓取。
 > - `.potx/.potm`（PowerPoint 模板）不受支持，请先另存为 `.pptx`。
 > - 指定 `maxRows`/`maxCols` 会回退 Python `excel_to_md.py`（保留行/列截断语义）。
@@ -586,6 +595,7 @@ general-tools/
 │   ├── index.ts              # MCP 服务入口（工具注册、请求处理）
 │   ├── md-converter.ts       # Markdown → HTML 渲染管线
 │   ├── local-ocr-service.ts  # 本地 OCR 服务（PP-OCRv6，图片→单页 PDF→选择性 OCR）
+│   ├── ocr-quality.ts        # OCR 退化输出检测（全零/单字符支配/无内容，纯函数）
 │   ├── pdf-converter.ts      # Puppeteer PDF 转换核心
 │   ├── pdf-extractor.ts      # LiteParse PDF 文本/截图提取
 │   ├── pdf-postprocess.ts    # PDF 水印/二维码（pdf-lib）
@@ -696,6 +706,9 @@ fc-cache -fv
   - 输入优先级：image > url > base64 > pdf；图片包装为单页 PDF 后内存直调（无临时文件）
   - OCR 运行时缺失/模型获取失败 → 回退原生提取并附 warning，server 启动与纯文本路径不受任何影响
   - 逐页 provenance：source（Native/Ocr/Fused）、置信度、hostedRecommended（OCR 后仍不完整的页）
+  - 退化护栏：引擎静默失败（高置信度却返回全零/单一重复字符）无法从置信度看出，故对每张 OCR 页做输出签名检测，命中即追加 warning 并置 hostedRecommended；只标注不丢弃内容，与引擎自身空页告警不重复
+  - 护栏统计按 **Unicode 码点**计数而非 `string.length`：中日韩扩展 B/C/D 区罕用汉字（古籍、人名用字）每字占 2 个 UTF-16 单元，按代码单元算会把单字符重复占比压成 50% 而漏报
+  - 通知落地渠道：`extract_pdf_text`（text 逐页标注 / markdown 聚合注释 / json 字段）、`recognize_text`（`pages[]`）、`convert_to_markdown`（结果 `warnings[]`，产物不改写）
 
 ---
 

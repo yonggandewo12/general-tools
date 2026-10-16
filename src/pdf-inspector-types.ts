@@ -15,10 +15,12 @@ import type {
   PageOcrReasons,
   StructureElementJs,
 } from '@firecrawl/pdf-inspector';
+import { detectDegeneracy } from './ocr-quality.js';
 
 // 注意：本文件只允许 type-only import/re-export。任何值导出（如
 // `export { OcrMode } from ...`）都会在模块加载阶段触发原生二进制
 // require，导致无 prebuilt 二进制的平台（macOS x86_64）在启动时崩溃。
+// `./ocr-quality.js` 为纯 JS 模块，不引入原生依赖，是此规则的唯一例外值导入。
 
 export type {
   TextItem,
@@ -68,8 +70,9 @@ export interface NormalizedOcrProvenance {
   source: 'Native' | 'Ocr' | 'Fused';
   /** OCR 置信度（0-1），仅 Ocr/Fused 页存在。 */
   ocrConfidence?: number;
-  /** OCR 完成后仍空/低置信/疑似不完整，建议托管解析。 */
+  /** OCR 完成后仍空/低置信/疑似不完整，建议改用其他解析途径。退化护栏命中时同样置真。 */
   hostedRecommended: boolean;
+  /** 引擎给出的告警，加上本地退化护栏追加的告警（见 `ocr-quality.ts`）。 */
   warnings: string[];
 }
 
@@ -125,11 +128,28 @@ export function normalizePagesExtraction(
 }
 
 /**
+ * 引擎自身就"该页没有可用文本"给出的告警文案特征。实测（apple silicon ONNX
+ * 后端）空页返回 `warnings: ['OCR produced no usable text']`、`markdown: ''`，
+ * 护栏据此去重，避免同一事实出现两条文案。全零/单字符支配两种签名引擎**不会**
+ * 报告；引擎另一条 `'<N> OCR spans with unusable text or geometry'` 说的是"部分
+ * 文本块被丢弃"，与"整页无文本"不是同一事实，故不匹配此正则。
+ */
+const ENGINE_EMPTY_REPORT = /no usable text/i;
+
+/**
  * Normalize `OcrPdfResult` (from `processPdfWithOcr`) to 0-indexed
  * `NormalizedPdfDocument`. Uses NAPI's real `pageCount`.
  *
  * `textItems` is optional; populate it via `extractTextWithPositions` at the
  * call site when needed (it is a synchronous blocking NAPI call).
+ *
+ * 退化护栏：对经过推理引擎的页（source ≠ Native）检测退化签名（全零/单字符
+ * 支配/无内容），命中即置 `hostedRecommended` 并追加 `warnings`（引擎已报"无可
+ * 用文本"的空页不重复追加告警文案）。三个 OCR 消费方——`recognize_text`
+ * （local-ocr-service）、`extract_pdf_text`（pdf-extract-adapter）、
+ * `convert_to_markdown`（ppt-master-service 的 convertPdfToMarkdown）——共用本
+ * 函数，因此护栏只需在此处生效一次。原生提取路径（`normalizePagesExtraction`）
+ * 不接护栏：该路径不产出 OCR 文本。
  */
 export function normalizeOcrPdfResult(
   result: OcrPdfResult,
@@ -137,19 +157,35 @@ export function normalizeOcrPdfResult(
 ): NormalizedPdfDocument {
   const itemsByPage = groupTextItemsByPage(textItems);
 
-  const pages: NormalizedPage[] = result.pages.map((p) => ({
-    pageIndex: p.pageNumber - 1,
-    markdown: p.markdown,
-    needsOcr: p.provenance.source !== 'Native',
-    ocrReason: undefined,
-    textItems: itemsByPage.get(p.pageNumber - 1) ?? [],
-    ocrProvenance: {
-      source: p.provenance.source,
-      ocrConfidence: p.provenance.ocrConfidence,
-      hostedRecommended: p.provenance.hostedRecommended,
-      warnings: p.provenance.warnings,
-    },
-  }));
+  const pages: NormalizedPage[] = result.pages.map((p) => {
+    const source = p.provenance.source;
+    // 复制上游数组：护栏不修改 NAPI 返回的对象，保证同一 result 二次归一化幂等。
+    const warnings = [...(p.provenance.warnings ?? [])];
+    let hostedRecommended = p.provenance.hostedRecommended ?? false;
+    if (source !== 'Native') {
+      const issue = detectDegeneracy(p.markdown);
+      if (issue) {
+        // 命中即标注不可采信，与引擎是否已置位无关；文案仅在引擎已报同类事实时不重复。
+        hostedRecommended = true;
+        if (!(issue.kind === 'empty' && warnings.some((w) => ENGINE_EMPTY_REPORT.test(w)))) {
+          warnings.push(issue.message);
+        }
+      }
+    }
+    return {
+      pageIndex: p.pageNumber - 1,
+      markdown: p.markdown,
+      needsOcr: source !== 'Native',
+      ocrReason: undefined,
+      textItems: itemsByPage.get(p.pageNumber - 1) ?? [],
+      ocrProvenance: {
+        source,
+        ocrConfidence: p.provenance.ocrConfidence,
+        hostedRecommended,
+        warnings,
+      },
+    };
+  });
 
   return {
     pageCount: result.pageCount,
