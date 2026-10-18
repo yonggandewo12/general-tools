@@ -83,10 +83,14 @@ jobs:
         run: npm install --registry=https://mirrors.huaweicloud.com/repository/npm --allow-remote=all --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000
 
       - name: Install Python dependencies
+        # python-docx is a hard requirement of the docx edit tools; without
+        # this file the e2e only passes by luck when the matching
+        # runtime-* sub-package happens to already be on npm at install time.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r scripts/ppt-master/requirements.txt
           python -m pip install -r scripts/excel/requirements.txt
+          python -m pip install -r scripts/docx/requirements.txt
 
       - name: Build
         run: npm run build
@@ -95,7 +99,7 @@ jobs:
         run: npm test
 
       - name: Smoke Python imports
-        run: python -c "import pptx, openpyxl, PIL; print('python deps OK')"
+        run: python -c "import pptx, openpyxl, PIL, docx; print('python deps OK')"
 
   build-platforms:
     name: Build runtime (${{ matrix.platform }})

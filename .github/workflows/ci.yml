@@ -48,10 +48,13 @@ jobs:
       - name: Install Python dependencies
         # Backward-compat path: verify that system Python + manual
         # pip install still works for users who set PPT_MASTER_PYTHON.
+        # python-docx is required by the docx edit tools; installing only the
+        # ppt-master + excel lists leaves the e2e dependent on luck.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r scripts/ppt-master/requirements.txt
           python -m pip install -r scripts/excel/requirements.txt
+          python -m pip install -r scripts/docx/requirements.txt
 
       - name: Build
         run: npm run build
@@ -67,7 +70,7 @@ jobs:
 
       - name: Smoke Python imports
         run: |
-          python -c "import pptx, openpyxl, PIL; print('python deps OK')"
+          python -c "import pptx, openpyxl, PIL, docx; print('python deps OK')"
 
   test-embedded-runtime:
     # Verifies that npm ci pulls the matching general-tools-mcp-server-runtime-*
