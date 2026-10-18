@@ -336,9 +336,11 @@ export class PythonScriptRunner {
     this.pythonExecutable = pythonExecutable ?? findPython();
     // If the embedded python was resolved, prefer its bundled scripts/ over
     // whatever lives next to the consumer's general-tools-mcp-server install.
-    // (The two trees are identical, but the embedded one ships with the
-    // runtime sub-package and avoids relying on the main package's files
-    // whitelist.)
+    // (The embedded copy ships with the runtime sub-package and avoids relying
+    // on the main package's files whitelist. NOTE: it is a snapshot taken when
+    // that sub-package was built, so it only matches this repo's scripts/ after
+    // `npm run build:platform`; editing scripts/ here does NOT change what the
+    // embedded runtime executes.)
     const embedded = EMBEDDED_CACHE;
     if (embedded && pythonExecutable === undefined) {
       this.scriptsRoot = scriptsRootOverride ?? embedded.scriptsRoot;

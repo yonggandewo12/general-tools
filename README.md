@@ -448,12 +448,14 @@ Claude，把 https://example.com 转为 Markdown
 | `vectorFigureDpi` | number | 矢量图渲染 DPI | 150 |
 
 > **内核与格式说明：**
-> - Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV 默认走 **anydoc** 内核（Rust 编译、Node 绑定，毫秒级转换），内嵌图片以 alt 文本保留、原始文件落到 `<输出名>_files/` 目录。
+> - Word/Excel/PowerPoint/ODF/RTF/EPUB/CSV 默认走 **anydoc** 内核（Rust 编译、Node 绑定，毫秒级转换）。公式（OMML）输出为 LaTeX `$…$` / `$$…$$`；Excel 单元格数字格式（百分比、货币、千分位、小数位）按格式渲染。
+> - 内嵌图片原始文件落到 `<输出名>_files/`，独立成段的图片会回填成 `![alt](<输出名>_files/…)` 链接；行内图片与空 alt 图片在 Markdown 里没有可区分的锚点，保持原样并记入 `image_manifest.json`、随 `warnings[]` 提示。
 > - PDF 走 `@firecrawl/pdf-inspector`（Rust + NAPI，多列阅读顺序、表格识别、毫秒级）；**不返回图片字节流**（`pdfImages` 选项对 PDF 是 no-op），需要原图请用 `screenshot_pdf` 出页面截图。
 > - PDF 的 OCR 质量通知（退化护栏命中页、OCR 运行时缺失回退）随结果 `warnings[]` 回传，stderr 同步打印；写出的 `.md` 产物保持识别原文，不注入标记。详见「本地 OCR 部署」的**退化护栏**。
 > - 网页 URL 走 Python 抓取。
 > - `.potx/.potm`（PowerPoint 模板）不受支持，请先另存为 `.pptx`。
-> - 指定 `maxRows`/`maxCols` 会回退 Python `excel_to_md.py`（保留行/列截断语义）。
+> - 指定 `maxRows`/`maxCols` 会回退 Python `excel_to_md.py`（保留行/列截断语义）；Python 引擎不套单元格数字格式，百分比/货币会以裸数值出现，结果会带 `warnings[]` 提示。`.xls/.xlsb/.ods/.csv` 只有 anydoc 认，此时会直接报错而不是回退。
+> - `timeout` 对两条路径都生效；但 anydoc 是 native 解析、无法取消，超时只是让调用方尽早拿到错误，解析仍会在后台跑完。
 
 ### 工具 8–32：Excel 操作（`excel_*`）
 

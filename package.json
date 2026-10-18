@@ -1,6 +1,6 @@
 {
   "name": "general-tools-mcp-server",
-  "version": "1.9.10",
+  "version": "1.9.11",
   "description": "MCP server for HTML/Markdown/PDF conversion, local OCR, PDF classification, PPT generation, and document-to-Markdown conversion",
   "type": "module",
   "bin": {
@@ -29,10 +29,10 @@
     "x64"
   ],
   "optionalDependencies": {
-    "general-tools-mcp-server-runtime-darwin-arm64": "1.9.5",
-    "general-tools-mcp-server-runtime-linux-arm64-gnu": "1.9.5",
-    "general-tools-mcp-server-runtime-linux-x64-gnu": "1.9.5",
-    "general-tools-mcp-server-runtime-win32-x64-msvc": "1.9.5"
+    "general-tools-mcp-server-runtime-darwin-arm64": "1.9.11",
+    "general-tools-mcp-server-runtime-linux-arm64-gnu": "1.9.11",
+    "general-tools-mcp-server-runtime-linux-x64-gnu": "1.9.11",
+    "general-tools-mcp-server-runtime-win32-x64-msvc": "1.9.11"
   },
   "scripts": {
     "build": "tsc",
@@ -59,7 +59,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@firecrawl/anydoc": "^0.1.9",
+    "@firecrawl/anydoc": "^0.2.4",
     "@firecrawl/pdf-inspector": "^1.15.0",
     "@llamaindex/liteparse": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.0.4",

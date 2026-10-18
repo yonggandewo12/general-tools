@@ -15,9 +15,11 @@ All paths produce the same output convention:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from datetime import date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +68,17 @@ def _markdown_escape(value: str) -> str:
     return re.sub(r"\s*\n\s*", "<br>", value).strip()
 
 
+def _format_number(value: float) -> str:
+    """最短往返精度，且不切科学计数。`f"{value:g}"` 只有 6 位有效数字，
+    9876543 会变成 9.87654e+06、-9876.543 会被截成 -9876.54。"""
+    if not math.isfinite(value):
+        return str(value)
+    text = format(Decimal(str(value)), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
 def _format_cell_value(value: Any) -> str:
     if _is_empty(value):
         return ""
@@ -78,7 +91,7 @@ def _format_cell_value(value: Any) -> str:
     if isinstance(value, time):
         return value.isoformat(timespec="seconds")
     if isinstance(value, float):
-        return _markdown_escape(f"{value:g}")
+        return _markdown_escape(_format_number(value))
     return _markdown_escape(str(value))
 
 

@@ -534,7 +534,7 @@ const GENERATE_PRESENTATION_TOOL: Tool = {
 
 const CONVERT_TO_MARKDOWN_TOOL: Tool = {
   name: 'convert_to_markdown',
-  description: 'Convert PDF, Word (docx/doc/odt/rtf/epub), Excel (xlsx/xls/xlsb/ods/csv), PowerPoint (pptx/ppt/odp), or web pages to Markdown. Auto-detects source type from file extension or URL.',
+  description: 'Convert PDF, Word (docx/doc/odt/rtf/epub), Excel (xlsx/xls/xlsb/ods/csv), PowerPoint (pptx/ppt/odp), or web pages to Markdown. Auto-detects source type from file extension or URL. Office documents keep embedded images as files under <output>_files/ (linked back into the Markdown when the image stands alone), render equations as LaTeX, and apply Excel cell number formats.',
   inputSchema: {
     type: 'object',
     properties: {
