@@ -300,7 +300,9 @@ describe('convert_to_markdown · anydoc 输出质量', () => {
     expect(md).not.toMatch(/9\.87654e\+06/i);
   });
 
-  it('maxRows 截断走 Python，并提示数字格式差异', async () => {
+  // 走 Python 子进程：CI runner 冷启动（解释器探测 + import 链）可超 vitest
+  // 默认 5s，留 30s 余量
+  it('maxRows 截断走 Python，并提示数字格式差异', { timeout: 30_000 }, async () => {
     const src = path.join(work, 'trunc.xlsx');
     await makeStyledXlsx(src);
     const out = path.join(work, 'trunc.md');
