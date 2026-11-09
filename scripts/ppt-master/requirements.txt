@@ -39,7 +39,10 @@ reportlab>=4.0.0
 # ─────────────────────────────────────────────────────────────
 # Converts PDF to Markdown with text, image, and table extraction.
 # 用于将 PDF 文件转换为 Markdown 格式，支持文本、图片、表格提取
-PyMuPDF>=1.23.0
+# 上界 <2：PyMuPDF 2.x 硬依赖 onnxruntime + pymupdf-layout/pymupdf4llm，
+# 会使嵌入 runtime 包膨胀 ~150MB（npm 发布上限被拒 E413），且 pdf_to_md.py
+# 使用的 fitz API 在 1.x 验证过。
+PyMuPDF>=1.23.0,<2
 
 # ─────────────────────────────────────────────────────────────
 # Document to Markdown tool / 文档转 Markdown 工具 (skills/ppt-master/scripts/source_to_md/doc_to_md.py)
