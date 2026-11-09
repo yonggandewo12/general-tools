@@ -29,6 +29,64 @@ export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** 终止子进程的信号（SIGSEGV/SIGTERM 等）；正常退出为 null。 */
+  signal: NodeJS.Signals | null;
+  /** 是否由本层的 timeoutMs 超时触发终止。与脚本自身退出码相互独立。 */
+  timedOut: boolean;
+}
+
+/**
+ * 把非零退出归纳成面向用户的失败原因，显式区分三种情况：
+ * 超时、被信号终止（崩溃/OOM/外部 kill）、脚本自行以非零码退出。
+ *
+ * 单独看 exitCode 会把这三者混为一谈（被杀进程的 exitCode 也是 -1）。
+ */
+export function describeRunFailure(result: RunResult): string {
+  if (result.timedOut) {
+    return `timed out and was terminated${result.signal ? ` (${result.signal})` : ''}`;
+  }
+  if (result.signal) {
+    return `terminated by signal ${result.signal}`;
+  }
+  return `exited with code ${result.exitCode}`;
+}
+
+/**
+ * 从宿主环境变量中剔除凭据类变量后再传给子进程。
+ *
+ * 子进程执行的是 scripts/ 下的第三方 Python 脚本，没有理由读取宿主的
+ * API key / token / 密码。环境是继承式的：不清洗就等于把全部凭据交给
+ * 每一个被执行的脚本。调用方仍可通过 `RunOptions.env` 显式传入需要的
+ * 变量（显式传入的值在清洗之后合并）。
+ *
+ * 保留：PATH、HOME、TMPDIR、LANG、系统代理等非凭据变量。
+ */
+export function scrubSecretEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  // 以词边界匹配常见凭据命名：AWS_SECRET_ACCESS_KEY、GITHUB_TOKEN、
+  // OPENAI_API_KEY、DATABASE_PASSWORD、NPM_TOKEN 等；覆盖复数（SECRETS/
+  // CREDENTIALS/KEYS）、缩写（PASS）、无下划线粘合（ACCESSKEY/APIKEY）与
+  // KEY 结尾（ENCRYPTION_KEY）等变体。
+  const SECRET_KEY_RE =
+    /(^|_)(API_?KEYS?|ACCESS_?KEYS?|SECRETS?|TOKENS?|PASSWORDS?|PASSWD|PASS|CREDENTIALS?|PRIVATE_?KEYS?|KEYS?)(_|$)/i;
+  // `AUTH` 单独作为关键词过宽：SSH_AUTH_SOCK 是 ssh-agent 的 socket 路径，
+  // 不含凭据。只剔除以 AUTH 结尾的变量（NPM_CONFIG__AUTH 等）。
+  const AUTH_SUFFIX_RE = /(^|_)AUTH$/i;
+  // 名字不含凭据关键词、但值里内嵌了 user:pass 的 DSN（DATABASE_URL /
+  // REDIS_URL / MONGODB_URI 等）。按值判断而非按 `_URL` 后缀判断，避免
+  // 误删 PUPPETEER_DOWNLOAD_BASE_URL 这类无凭据的公开地址。
+  // 用户名可缺省（redis://:secret@host → 空用户名 + 非空密码）。
+  const URL_WITH_CREDENTIALS_RE = /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]*:[^/@\s]+@/i;
+  // MYSQL_PWD 是唯一常见的纯 PWD 命名；不能按 `PWD` 词段匹配，否则会误删
+  // 标准的 shell 工作目录变量 PWD。
+  const out: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (SECRET_KEY_RE.test(key)) continue;
+    if (AUTH_SUFFIX_RE.test(key)) continue;
+    if (key === 'MYSQL_PWD') continue;
+    if (typeof value === 'string' && URL_WITH_CREDENTIALS_RE.test(value)) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 /** Thrown when no working Python interpreter can be located. */
@@ -359,10 +417,10 @@ export class PythonScriptRunner {
   async checkPython(): Promise<void> {
     try {
       const result = await this.runRaw(['--version'], { timeoutMs: 10000 });
-      if (result.exitCode !== 0) {
+      if (result.exitCode !== 0 || result.signal) {
         throw new MissingPythonError(
           installHintForOS(),
-          `python interpreter at ${this.pythonExecutable} returned non-zero (${result.exitCode}).\n${result.stderr}`,
+          `python interpreter at ${this.pythonExecutable} ${describeRunFailure(result)}.\n${result.stderr}`,
         );
       }
     } catch (err) {
@@ -426,7 +484,7 @@ export class PythonScriptRunner {
     return new Promise((resolve, reject) => {
       const cwd = options?.cwd ?? process.cwd();
       const env: NodeJS.ProcessEnv = {
-        ...process.env,
+        ...scrubSecretEnv(process.env),
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8:replace',
         PYTHONPATH: this.scriptsRoot,
@@ -475,7 +533,11 @@ export class PythonScriptRunner {
       }
 
       const timeoutMs = options?.timeoutMs ?? 120000;
+      // 超时标志与退出信号分开记录：被杀进程的 exitCode 同为 -1/null，
+      // 只靠 exitCode 无法区分子进程崩溃、被外部 kill 与本层超时。
+      let timedOut = false;
       const timeout = setTimeout(() => {
+        timedOut = true;
         child.kill('SIGTERM');
         setTimeout(() => {
           // child.killed only reports that a signal was sent, not that the
@@ -490,10 +552,10 @@ export class PythonScriptRunner {
         clearTimeout(timeout);
         activeChildren.delete(child);
       };
-      const settle = (exitCode: number) => {
+      const settle = (exitCode: number, signal: NodeJS.Signals | null = null) => {
         if (settled) return;
         finish();
-        resolve({ exitCode, stdout, stderr });
+        resolve({ exitCode, stdout, stderr, signal, timedOut });
       };
 
       child.on('error', (err) => {
@@ -515,13 +577,15 @@ export class PythonScriptRunner {
 
       // 'close' 需等 stdio 全部 EOF；孙进程（soffice/ppt-master 管道）继承管道时
       // 可能永不触发，故 'exit' 后加宽限期兜底结算，防止 Promise 永久挂起。
-      child.on('exit', (code) => {
-        const grace = setTimeout(() => settle(code ?? -1), 2000);
-        grace.unref();
+      let graceTimer: NodeJS.Timeout | undefined;
+      child.on('exit', (code, signal) => {
+        graceTimer = setTimeout(() => settle(code ?? -1, signal), 2000);
+        graceTimer.unref();
       });
 
-      child.on('close', (exitCode) => {
-        settle(exitCode ?? -1);
+      child.on('close', (exitCode, signal) => {
+        if (graceTimer) clearTimeout(graceTimer);
+        settle(exitCode ?? -1, signal);
       });
     });
   }

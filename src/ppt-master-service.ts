@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { Format } from '@firecrawl/anydoc';
-import { PythonScriptRunner } from './python-runner.js';
+import { PythonScriptRunner, describeRunFailure } from './python-runner.js';
 import { extractMarkdown, classifyPdf, processPdfWithOcrFor } from './pdf-inspector-service.js';
 import type { NormalizedPdfDocument } from './pdf-inspector-types.js';
 import {
@@ -291,8 +291,10 @@ export class PptMasterService {
     const finalizeResult = await this.runner.run('finalize_svg.py', [projectDir, '--quiet'], {
       timeoutMs: options.timeout ?? 120000,
     });
-    if (finalizeResult.exitCode !== 0) {
-      throw new Error(`finalize_svg failed:\n${finalizeResult.stdout}\n${finalizeResult.stderr}`);
+    if (finalizeResult.exitCode !== 0 || finalizeResult.signal) {
+      throw new Error(
+        `finalize_svg ${describeRunFailure(finalizeResult)}:\n${finalizeResult.stdout}\n${finalizeResult.stderr}`,
+      );
     }
 
     // Run svg_to_pptx
@@ -305,8 +307,10 @@ export class PptMasterService {
     const pptxResult = await this.runner.run('svg_to_pptx.py', pptxArgs, {
       timeoutMs: options.timeout ?? 120000,
     });
-    if (pptxResult.exitCode !== 0) {
-      throw new Error(`svg_to_pptx failed:\n${pptxResult.stdout}\n${pptxResult.stderr}`);
+    if (pptxResult.exitCode !== 0 || pptxResult.signal) {
+      throw new Error(
+        `svg_to_pptx ${describeRunFailure(pptxResult)}:\n${pptxResult.stdout}\n${pptxResult.stderr}`,
+      );
     }
 
     // Determine output path
@@ -398,8 +402,10 @@ export class PptMasterService {
       ['init', projectName, '--format', options.canvasFormat ?? 'ppt169', '--dir', baseDir],
       { timeoutMs: options.timeout ?? 120000 }
     );
-    if (result.exitCode !== 0) {
-      throw new Error(`project_manager init failed:\n${result.stdout}\n${result.stderr}`);
+    if (result.exitCode !== 0 || result.signal) {
+      throw new Error(
+        `project_manager init ${describeRunFailure(result)}:\n${result.stdout}\n${result.stderr}`,
+      );
     }
 
     // Parse project directory from output
@@ -438,8 +444,10 @@ export class PptMasterService {
     const result = await this.runner.run('project_manager.py', args, {
       timeoutMs: options.timeout ?? 120000,
     });
-    if (result.exitCode !== 0) {
-      throw new Error(`project_manager import-sources failed:\n${result.stdout}\n${result.stderr}`);
+    if (result.exitCode !== 0 || result.signal) {
+      throw new Error(
+        `project_manager import-sources ${describeRunFailure(result)}:\n${result.stdout}\n${result.stderr}`,
+      );
     }
   }
 
@@ -778,8 +786,10 @@ export class PptMasterService {
     }
 
     const result = await this.runner.run(script, args, { timeoutMs: options.timeout ?? 120000 });
-    if (result.exitCode !== 0) {
-      throw new Error(`source_to_md failed:\n${result.stdout}\n${result.stderr}`);
+    if (result.exitCode !== 0 || result.signal) {
+      throw new Error(
+        `source_to_md ${describeRunFailure(result)}:\n${result.stdout}\n${result.stderr}`,
+      );
     }
 
     const assetsDir = await this.locateAssetsDir(outputPath);

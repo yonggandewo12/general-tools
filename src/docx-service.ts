@@ -10,7 +10,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { PythonScriptRunner } from './python-runner.js';
+import { PythonScriptRunner, describeRunFailure } from './python-runner.js';
 import { HtmlToDocxConverter } from './html-to-docx.js';
 import { MdConverter } from './md-converter.js';
 
@@ -74,7 +74,7 @@ export class DocxService {
     if (this.docxDepsChecked) return;
     const runner = this.getRunner();
     const result = await runner.runPath(DOCX_RUN_PY, ['--check'], { timeoutMs: 15000 });
-    if (result.exitCode !== 0) {
+    if (result.exitCode !== 0 || result.signal) {
       let detail = result.stderr.slice(0, 300);
       try {
         const parsed = JSON.parse(result.stdout.trim()) as { error?: string };
@@ -83,7 +83,7 @@ export class DocxService {
         /* keep stderr */
       }
       throw new Error(
-        `DOCX edit dependencies not ready: ${detail}. ` +
+        `DOCX edit dependencies not ready (${describeRunFailure(result)}): ${detail}. ` +
           `Install python-docx (pip install python-docx) or the platform runtime package.`,
       );
     }
@@ -223,7 +223,11 @@ ${content}
       });
       const stdout = result.stdout?.trim();
       if (!stdout) {
-        return { success: false, error: `DOCX script returned no output: ${result.stderr?.trim()}` };
+        const cause = result.timedOut || result.signal ? ` (${describeRunFailure(result)})` : '';
+        return {
+          success: false,
+          error: `DOCX script returned no output${cause}: ${result.stderr?.trim()}`,
+        };
       }
       let parsed: { success?: boolean; data?: unknown; error?: string };
       try {

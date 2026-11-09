@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import * as path from 'path';
-import { PythonScriptRunner, resolvePackageRoot } from './python-runner.js';
+import { PythonScriptRunner, describeRunFailure, resolvePackageRoot } from './python-runner.js';
 
 export interface ScriptServiceCallResult {
   success: boolean;
@@ -45,9 +45,9 @@ export abstract class PythonScriptService {
       throw new Error(`${this.label} entry script not found: ${this.runScript}`);
     }
     const result = await this.runner.runPath(this.runScript, ['--check'], { timeoutMs: 15000 });
-    if (result.exitCode !== 0) {
+    if (result.exitCode !== 0 || result.signal) {
       throw new Error(
-        `${this.label} dependencies not ready (exit ${result.exitCode}). ` +
+        `${this.label} dependencies not ready (${describeRunFailure(result)}). ` +
           `Ensure ${this.depHint} is installed.\n${result.stderr}`
       );
     }
@@ -66,10 +66,14 @@ export abstract class PythonScriptService {
 
     const stdout = result.stdout.trim();
     if (!stdout) {
+      // 超时/信号与「脚本正常跑完但没输出」是不同故障，分开报，避免把中断误读为协议错误
+      const cause = result.timedOut || result.signal ? ` (${describeRunFailure(result)})` : '';
       return {
         success: false,
-        error: `${this.label} action ${action} produced no output. stderr: ${result.stderr.slice(0, 500)}`,
-        code: 'NO_OUTPUT',
+        error:
+          `${this.label} action ${action} produced no output${cause}. ` +
+          `stderr: ${result.stderr.slice(0, 500)}`,
+        code: result.timedOut ? 'TIMEOUT' : 'NO_OUTPUT',
         details: { processingTime },
       };
     }

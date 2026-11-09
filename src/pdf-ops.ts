@@ -186,6 +186,26 @@ function buildContinuousRanges(indices: number[]): [number, number][] {
 }
 
 /**
+ * 校验拆分输出文件名前缀：空值回退到源文件 stem，非空时必须是裸文件名。
+ *
+ * 该值来自 MCP 调用参数并直接进入 `path.join(dir, filename)`；若允许携带
+ * `../` 或绝对路径，输出会逃出 `outputDir`。这里显式拒绝而不是静默改写，
+ * 让调用方知道参数未被接受，避免误以为文件写到了 expected 位置。
+ */
+function sanitizeOutputPrefix(prefix: string, fallback: string): string {
+  const trimmed = prefix.trim();
+  if (!trimmed) return fallback;
+  if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
+    throw new Error(`outputNamePrefix 不能包含路径分隔符或为相对路径: "${prefix}"`);
+  }
+  // win32 上这些字符会使文件名非法；提前拒绝比等到 writeFile 抛 EINVAL 更清晰
+  if (process.platform === 'win32' && /[:*?"<>|]/.test(trimmed)) {
+    throw new Error(`outputNamePrefix 含 Windows 非法文件名字符: "${prefix}"`);
+  }
+  return trimmed;
+}
+
+/**
  * Split a PDF by page ranges into multiple files.
  * pageRanges syntax: "1-3,5,7-9" (1-based, inclusive).
  */
@@ -209,7 +229,9 @@ export async function splitPdf(
 
     const stem = path.basename(pdfPath, path.extname(pdfPath));
     const dir = outputDir ? path.resolve(outputDir) : path.join(path.dirname(pdfPath), `${stem}_split`);
-    const prefix = outputNamePrefix || stem;
+    const prefix = sanitizeOutputPrefix(outputNamePrefix ?? '', stem);
+    // 二次防线：即使前缀校验被绕过，也确保最终路径仍在 dir 内
+    const dirRoot = path.resolve(dir) + path.sep;
 
     await fs.promises.mkdir(dir, { recursive: true });
 
@@ -224,7 +246,10 @@ export async function splitPdf(
       const from = rangeStart + 1;
       const to = rangeEnd + 1;
       const filename = `${prefix}_${from}-${to}.pdf`;
-      const outPath = path.join(dir, filename);
+      const outPath = path.resolve(dir, filename);
+      if (!outPath.startsWith(dirRoot)) {
+        throw new Error(`拒绝写入 outputDir 之外的路径: ${outPath}`);
+      }
       await fs.promises.writeFile(outPath, await out.save({ useObjectStreams: true }));
       outputFiles.push({ path: outPath, pageCount: rangeEnd - rangeStart + 1, range: `${from}-${to}` });
     }

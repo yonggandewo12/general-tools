@@ -525,7 +525,7 @@ Claude，把 https://example.com 转为 Markdown
 | 工具 | 说明 |
 |------|------|
 | `pdf_merge_pdfs` | 合并多个 PDF 为一个文件（`pdfPaths` 数组 + `outputPath`） |
-| `pdf_split_pdf` | 按页码范围拆分（`"1-3,5,7-9"` 语法）为多个文件 |
+| `pdf_split_pdf` | 按页码范围拆分（`"1-3,5,7-9"` 语法）为多个文件；`outputNamePrefix` 必须是裸文件名（含路径分隔符会被拒绝，防越出 `outputDir`），空值回退到源文件 stem |
 | `pdf_extract_pages` | 提取指定页到单个新 PDF |
 | `pdf_compress_pdf` | 重新打包压缩（`useObjectStreams`，移除增量更新） |
 | `pdf_encrypt_pdf` | 设置用户/所有者密码与权限（`permissions`：printing/modifying/copying 等） |
@@ -577,8 +577,8 @@ Claude，把 https://example.com 转为 Markdown
 |------|------|
 | `pdf_fill_form` | 读取或填充 PDF AcroForm 表单（text/checkbox/radio/dropdown/optionlist；不传 `fields` 仅列出字段）；中文值自动嵌入系统中文字体（macOS Arial Unicode / Windows SimHei / Linux DroidSansFallback）；`flatten` 可选扁平化 |
 | `md_to_epub` | Markdown → EPUB 电子书（`splitByHeading` 按 h1 分章，相对路径图片嵌入 epub 包，可选 EPUB 2/3、封面、作者、出版方） |
-| `qrcode_generate` | 文本 → 二维码 PNG/SVG/DataURL（UTF-8 含中文；宽度/容错等级/边距/前景背景色可配） |
-| `archive_compress` | 文件/目录 → zip（0-9 级压缩）或 tar（ustar 打包），目录递归、相对路径保留 |
+| `qrcode_generate` | 文本 → 二维码 PNG/SVG/DataURL（UTF-8 含中文；宽度/容错等级/边距/前景背景色可配）；仅能产出 `.png`/`.svg`，其他扩展名显式报错而非静默写错格式 |
+| `archive_compress` | 文件/目录 → zip（0-9 级压缩）或 tar（ustar 打包），目录递归、相对路径保留；不同源文件的同名条目会报错而非静默覆盖（同一文件重复传入视为幂等） |
 | `archive_extract` | zip 解压到目录（`../` 与绝对路径条目自动丢弃，防路径穿越） |
 | `sqlite_query` | SQLite SELECT（参数化绑定，BigInt/Buffer 自动 JSON 化） |
 | `sqlite_exec` | SQLite 写操作与 DDL（返回 changes/lastInsertRowid；数据库不存在时自动创建） |

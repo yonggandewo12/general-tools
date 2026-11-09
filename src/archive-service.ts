@@ -115,16 +115,22 @@ export interface ArchiveResult {
   details?: { processingTime: number };
 }
 
-async function collectFiles(target: string): Promise<[string, Buffer][]> {
+/**
+ * 收集目标文件/目录下的所有文件。
+ *
+ * 返回 `[归档内路径, 内容, 源绝对路径]`：源路径仅用于同名冲突时给出可操作的
+ * 诊断，不写入归档。
+ */
+async function collectFiles(target: string): Promise<[string, Buffer, string][]> {
   const stat = await fs.stat(target);
   if (stat.isFile()) {
     const rel = path.basename(target);
-    return [[rel, await fs.readFile(target)]];
+    return [[rel, await fs.readFile(target), target]];
   }
   if (!stat.isDirectory()) {
     throw new Error(`不支持的路径类型: ${target}`);
   }
-  const out: [string, Buffer][] = [];
+  const out: [string, Buffer, string][] = [];
   const walk = async (dir: string, prefix: string): Promise<void> => {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const ent of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -135,7 +141,7 @@ async function collectFiles(target: string): Promise<[string, Buffer][]> {
       if (ent.isDirectory()) {
         await walk(full, rel);
       } else if (ent.isFile()) {
-        out.push([rel, await fs.readFile(full)]);
+        out.push([rel, await fs.readFile(full), full]);
       }
       // symlink / socket 等忽略
     }
@@ -157,7 +163,7 @@ export async function compressArchive(options: ArchiveCompressOptions): Promise<
       throw new Error(`不支持的归档格式: ${format}（仅 zip/tar）`);
     }
 
-    const files: [string, Buffer][] = [];
+    const files: [string, Buffer, string][] = [];
     for (const p of options.paths) {
       const abs = path.resolve(p);
       try {
@@ -165,15 +171,28 @@ export async function compressArchive(options: ArchiveCompressOptions): Promise<
       } catch {
         throw new Error(`路径不存在: ${p}`);
       }
-      files.push(...(await collectFiles(abs)));
+      // 逐个 push 而非 spread：大目录（>10 万文件）展开成实参会爆栈
+      for (const entry of await collectFiles(abs)) files.push(entry);
     }
     if (files.length === 0) {
       throw new Error('没有可打包的文件');
     }
 
-    // 去重：同一相对路径出现多次时后者覆盖前者
+    // 同名条目来自不同源文件时必须报错：静默覆盖会让归档少文件，而 fileCount
+    // 报的是 Map.size，调用方看不出丢数据。同一源文件重复传入则视为幂等去重。
     const fileMap = new Map<string, Uint8Array>();
-    for (const [rel, buf] of files) fileMap.set(rel, buf);
+    const sourceByEntry = new Map<string, string>();
+    for (const [rel, buf, source] of files) {
+      const prevSource = sourceByEntry.get(rel);
+      if (prevSource !== undefined && prevSource !== source) {
+        throw new Error(
+          `归档内条目重名: "${rel}" 同时来自 "${prevSource}" 和 "${source}"。` +
+            `请重命名其中一项，或改为传入各自的父目录以保留相对路径。`,
+        );
+      }
+      sourceByEntry.set(rel, source);
+      fileMap.set(rel, buf);
+    }
 
     const outBytes =
       format === 'zip'

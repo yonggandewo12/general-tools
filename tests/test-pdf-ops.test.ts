@@ -92,6 +92,45 @@ describe('PDF 合并/拆分/提取/压缩（纯 JS pdf-lib）', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('splitPdf 拒绝带路径分隔符的 outputNamePrefix（防目录穿越）', async () => {
+    const dir = await tmp();
+    const src = await makePdf(dir, 'src.pdf', 3);
+    const outDir = path.join(dir, 'split');
+    for (const bad of ['../../escaped', 'a/b', 'a\\b', '..', '.', '/abs']) {
+      const r = await splitPdf(src, '1-2', outDir, bad);
+      expect(r.success, `prefix=${JSON.stringify(bad)} 应被拒绝`).toBe(false);
+      expect(r.outputFiles).toBeUndefined();
+    }
+    // 越界文件不得落在 outDir 之外
+    const escaped = path.resolve(outDir, '..', 'escaped_1-2.pdf');
+    await expect(fs.stat(escaped)).rejects.toThrow();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('splitPdf 空前缀回退到源文件 stem（保持旧行为）', async () => {
+    const dir = await tmp();
+    const src = await makePdf(dir, 'src.pdf', 3);
+    const outDir = path.join(dir, 'split');
+    for (const empty of [undefined, '', '   ']) {
+      const r = await splitPdf(src, '1-2', outDir, empty);
+      expect(r.success, `prefix=${JSON.stringify(empty)} 应回退到 stem`).toBe(true);
+      expect(path.basename(r.outputFiles![0].path)).toBe('src_1-2.pdf');
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('splitPdf 接受正常前缀并写在 outputDir 内', async () => {
+    const dir = await tmp();
+    const src = await makePdf(dir, 'src.pdf', 3);
+    const outDir = path.join(dir, 'split');
+    const r = await splitPdf(src, '1-2', outDir, 'part-1');
+    expect(r.success).toBe(true);
+    for (const f of r.outputFiles!) {
+      expect(path.dirname(path.resolve(f.path))).toBe(path.resolve(outDir));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('extractPages 提取指定页到单文件', async () => {
     const dir = await tmp();
     const src = await makePdf(dir, 'src.pdf', 5);
